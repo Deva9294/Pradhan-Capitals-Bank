@@ -10,3 +10,24 @@ $("#loginForm")?.addEventListener("submit",async e=>{e.preventDefault();const ro
 $("#transferForm")?.addEventListener("submit",async e=>{e.preventDefault();const session=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");if(!session){alert("Please sign in to the demo portal.");return}const r=await fetch("/api/demo/transfer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({beneficiary:$("#beneficiary").value,amount:$("#transferAmount").value,rail:$("#rail").value})});const d=await r.json();$("#transferMessage").textContent=d.message||d.error;});
 $("#exportCsv")?.addEventListener("click",()=>{const rows=[["Date","Description","Type","Amount"],["2026-11-03","Demo salary credit","Credit","42000"],["2026-11-02","Utility payment simulation","Debit","1850"]];const csv=rows.map(x=>x.join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="pcb-demo-statement.csv";a.click();URL.revokeObjectURL(a.href)});
 const role=new URLSearchParams(location.search).get("role");if($("#dashboardRole"))$("#dashboardRole").textContent=(role||"customer").toUpperCase()+" DEMO CONSOLE";if($("#dashboardName")){const s=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");$("#dashboardName").textContent=s?.displayName||"Demo User"};if($("#loginRole"))$("#loginRole").textContent=(location.pathname.split("/").pop()||"customer").toUpperCase();
+
+
+/* Prototype-only security UX: client-side idle warning and demo step-up challenge.
+   Production sessions must be enforced server-side with secure, HttpOnly cookies. */
+(function securityDemo(){
+  const session=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");
+  if(location.pathname==="/dashboard.html"){
+    const expected=new URLSearchParams(location.search).get("role");
+    if(!session || !expected || session.role!==expected){location.replace("/login/"+(expected||"customer"));return;}
+    let idleTimer,warningTimer;
+    const lock=()=>{sessionStorage.removeItem("pcb-demo-session");alert("Demo session expired due to inactivity.");location.replace("/login/"+expected)};
+    const reset=()=>{clearTimeout(idleTimer);clearTimeout(warningTimer);warningTimer=setTimeout(()=>alert("Your demo session will expire soon due to inactivity."),13*60*1000);idleTimer=setTimeout(lock,15*60*1000)};
+    ["click","keydown","mousemove","touchstart"].forEach(evt=>document.addEventListener(evt,reset,{passive:true}));
+    reset();
+  }
+  const transfer=$("#transferForm");
+  if(transfer)transfer.addEventListener("submit",e=>{
+    // Existing submit handler performs the mock API request. This handler only documents
+    // that a demo OTP challenge is not a real authentication factor.
+  },true);
+})();
