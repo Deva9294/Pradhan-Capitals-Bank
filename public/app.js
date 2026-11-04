@@ -7,7 +7,7 @@ $$("[data-tab]").forEach(btn=>btn.addEventListener("click",()=>{$$("[data-tab]")
 const stepEls=$$("[data-step]");let step=0;function showStep(){stepEls.forEach((e,i)=>e.classList.toggle("hidden",i!==step));if($("#stepProgress"))$("#stepProgress").style.width=((step+1)/stepEls.length*100)+"%";if($("#stepLabel"))$("#stepLabel").textContent="Step "+(step+1)+" of "+stepEls.length}
 $("#nextStep")?.addEventListener("click",()=>{const fields=$$("[data-step]")[step].querySelectorAll("input[required],select[required]");for(const f of fields){if(!f.reportValidity())return}if(step<stepEls.length-1){step++;showStep()}else{$("#accountResult")?.classList.remove("hidden");$("#referenceId").textContent="PCB-"+Date.now().toString().slice(-8)}});$("#prevStep")?.addEventListener("click",()=>{if(step>0){step--;showStep()}});if(stepEls.length)showStep();
 $("#loginForm")?.addEventListener("submit",async e=>{e.preventDefault();const role=location.pathname.split("/").pop()||"customer";const body={role,username:$("#username").value,password:$("#password").value};try{const r=await fetch("/api/demo-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error);sessionStorage.setItem("pcb-demo-session",JSON.stringify(d));location.href="/dashboard.html?role="+role}catch(err){$("#loginMessage").textContent=err.message}});
-$("#transferForm")?.addEventListener("submit",async e=>{e.preventDefault();const session=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");if(!session){alert("Please sign in to the demo portal.");return}const demoOtp=prompt("DEMO OTP challenge: enter 123456 to continue (simulation only).");if(demoOtp!=="123456"){alert("Demo verification cancelled or incorrect.");return}const r=await fetch("/api/demo/transfer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({beneficiary:$("#beneficiary").value,amount:$("#transferAmount").value,rail:$("#rail").value})});const d=await r.json();$("#transferMessage").textContent=d.message||d.error;});
+$("#transferForm")?.addEventListener("submit",async e=>{e.preventDefault();const session=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");if(!session){alert("Please sign in to the demo portal.");return}const demoOtp=prompt("DEMO OTP challenge: enter 123456 to continue (simulation only).");if(demoOtp!=="123456"){alert("Demo verification cancelled or incorrect.");return}const r=await fetch("/api/demo/transfer",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.token},body:JSON.stringify({beneficiary:$("#beneficiary").value,amount:$("#transferAmount").value,rail:$("#rail").value})});const d=await r.json();$("#transferMessage").textContent=d.message||d.error;if(r.status===401){sessionStorage.removeItem("pcb-demo-session");location.replace("/login/customer")}});
 $("#exportCsv")?.addEventListener("click",()=>{const rows=[["Date","Description","Type","Amount"],["2026-11-03","Demo salary credit","Credit","42000"],["2026-11-02","Utility payment simulation","Debit","1850"]];const csv=rows.map(x=>x.join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="pcb-demo-statement.csv";a.click();URL.revokeObjectURL(a.href)});
 const role=new URLSearchParams(location.search).get("role");if($("#dashboardRole"))$("#dashboardRole").textContent=(role||"customer").toUpperCase()+" DEMO CONSOLE";if($("#dashboardName")){const s=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");$("#dashboardName").textContent=s?.displayName||"Demo User"};if($("#loginRole"))$("#loginRole").textContent=(location.pathname.split("/").pop()||"customer").toUpperCase();
 
@@ -31,3 +31,34 @@ const role=new URLSearchParams(location.search).get("role");if($("#dashboardRole
     // that a demo OTP challenge is not a real authentication factor.
   },true);
 })();
+
+
+/* Server-validated demo identity and sample statement. */
+(async function loadDemoWorkspace(){
+  if(location.pathname!=="/dashboard.html") return;
+  const stored=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");
+  if(!stored?.token) return;
+  try{
+    const response=await fetch("/api/demo/session",{headers:{Authorization:"Bearer "+stored.token}});
+    if(!response.ok) throw new Error("Demo session expired");
+    const identity=await response.json();
+    if(identity.role!==new URLSearchParams(location.search).get("role")) throw new Error("Role mismatch");
+    if($("#dashboardName")) $("#dashboardName").textContent=identity.displayName;
+    const summaryResponse=await fetch("/api/demo/summary",{headers:{Authorization:"Bearer "+stored.token}});
+    if(!summaryResponse.ok) throw new Error("Could not load demo summary");
+    const summary=await summaryResponse.json();
+    const balance=$(".metric");
+    if(balance) balance.textContent=money(summary.account.availableBalance);
+    const target=$("#demoTransactions");
+    if(target) target.innerHTML=summary.transactions.map(tx=>`<tr><td>${tx.date}</td><td>${tx.description}</td><td>${tx.type}</td><td>${money(tx.amount)}</td><td>${tx.status}</td></tr>`).join("");
+  }catch(error){
+    sessionStorage.removeItem("pcb-demo-session");
+    location.replace("/login/"+(new URLSearchParams(location.search).get("role")||"customer"));
+  }
+})();
+$("#logoutBtn")?.addEventListener("click",async()=>{
+  const stored=JSON.parse(sessionStorage.getItem("pcb-demo-session")||"null");
+  if(stored?.token) await fetch("/api/demo-logout",{method:"POST",headers:{Authorization:"Bearer "+stored.token}}).catch(()=>{});
+  sessionStorage.removeItem("pcb-demo-session");
+  location.replace("/login/customer");
+});
