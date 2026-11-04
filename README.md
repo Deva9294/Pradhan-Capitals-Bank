@@ -18,8 +18,26 @@ A responsive multi-page banking UI and Express demo API. This repository is an e
 4. Run `npm start`.
 5. Open `http://localhost:3000`.
 
+## Deploy to Render
+
+This repository now includes a Render Blueprint at `render.yaml`.
+
+1. Push/confirm the latest `main` branch on GitHub.
+2. In Render, choose **New → Blueprint** and connect `Deva9294/Pradhan-Capitals-Bank`.
+3. Review the service named `pradhan-capitals-bank` and apply the Blueprint.
+4. Render installs dependencies with `npm install`, starts with `npm start`, and checks `/api/health`.
+5. After deployment, open the generated `onrender.com` URL and verify the home page and `/api/health`.
+
+No database or payment credentials are required for this demo prototype. Do not add real customer data, banking secrets, Aadhaar/PAN data, or production credentials. The optional `PUBLIC_URL` variable can be set to the deployed public URL; otherwise the sitemap uses Render's `RENDER_EXTERNAL_URL`.
+
+### Deployment checks
+
+- Runtime pinned to Node.js 20.19.0 via `.node-version` and Render environment configuration.
+- Run `npm test` locally to perform JavaScript syntax checks for the server and browser script.
+- Render health check: `GET /api/health`.
+
 ## Important safety boundary
-All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. Demo bearer tokens are random, held only in server memory, and expire after 15 minutes; a server restart clears them. This is prototype session plumbing, not production-grade identity or authentication. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
+All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. Demo bearer tokens are random, held only in server memory, and expire after 15 minutes; a server restart or instance replacement clears them. This in-memory design is not suitable for a multi-instance deployment. This is prototype session plumbing, not production-grade identity or authentication. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
 
 ## Production integration roadmap (requires authorised banking partner and regulatory/legal review)
 - Replace demo login with an audited identity provider, MFA, short-lived server-side sessions, CSRF protection, secure cookies, device risk checks and account lockout.
