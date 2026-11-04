@@ -6,7 +6,8 @@ A responsive multi-page banking UI and Express demo API. This repository is an e
 - Public pages: home, account opening wizard, loans + EMI calculator, FD calculator, rates & charges.
 - Role entry points: `/login/customer`, `/login/staff`, `/login/manager`, `/login/admin`.
 - Demo console: simulated account summary, transaction history export and transfer simulation.
-- Express API: health, demo login, sample summary, transfer simulation.
+- Express API: health, demo login, expiring in-memory demo sessions, session validation, logout, protected sample summary and customer-only transfer simulation.
+- Role-aware API checks for the customer transfer demo; dashboard fetches identity and statement data from the server.
 - SEO: per-page metadata, FinancialService / FAQ structured data, robots.txt and sitemap.xml.
 - Responsive design, accessible labels and semantic page structure.
 
@@ -18,7 +19,7 @@ A responsive multi-page banking UI and Express demo API. This repository is an e
 5. Open `http://localhost:3000`.
 
 ## Important safety boundary
-All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
+All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. Demo bearer tokens are random, held only in server memory, and expire after 15 minutes; a server restart clears them. This is prototype session plumbing, not production-grade identity or authentication. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
 
 ## Production integration roadmap (requires authorised banking partner and regulatory/legal review)
 - Replace demo login with an audited identity provider, MFA, short-lived server-side sessions, CSRF protection, secure cookies, device risk checks and account lockout.
