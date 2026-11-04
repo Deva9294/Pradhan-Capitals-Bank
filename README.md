@@ -36,6 +36,10 @@ No database or payment credentials are required for this demo prototype. Do not 
 - Run `npm test` locally to perform JavaScript syntax checks for the server and browser script.
 - Render health check: `GET /api/health`.
 
+## Automated repository checks
+
+GitHub Actions runs the validation workflow on pushes and pull requests to `main`, and weekly on Monday. It installs dependencies, runs `npm test`, checks npm advisories at high severity, and starts the app to probe `/api/health`. Dependabot checks npm dependencies weekly and can open update pull requests. Workflow results are visible in the repository's **Actions** tab; this does not send a ChatGPT notification.
+
 ## Important safety boundary
 All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. Demo bearer tokens are random, held only in server memory, and expire after 15 minutes; a server restart or instance replacement clears them. This in-memory design is not suitable for a multi-instance deployment. This is prototype session plumbing, not production-grade identity or authentication. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
 
