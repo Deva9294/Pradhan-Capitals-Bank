@@ -62,3 +62,5 @@ $("#logoutBtn")?.addEventListener("click",async()=>{
   sessionStorage.removeItem("pcb-demo-session");
   location.replace("/login/customer");
 });
+
+// Role portal implementation is loaded separately on auth and dashboard pages.
