@@ -9,6 +9,7 @@ const bcrypt=require("bcryptjs");
 const path=require("path");
 const crypto=require("crypto");
 
+if(process.env.NODE_ENV==="production"&&!process.env.SESSION_SECRET)throw new Error("SESSION_SECRET is required in production.");
 const app=express();
 const PORT=process.env.PORT||3000;
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
