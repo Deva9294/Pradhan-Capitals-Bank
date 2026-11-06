@@ -3,9 +3,11 @@ services:
     name: pradhan-capitals-bank
     runtime: node
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    # Keep these commands explicit for the existing Render service configuration.
+    buildCommand: yarn install
+    startCommand: node server.js
     healthCheckPath: /api/health
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 20.19.0
