@@ -1,40 +1,39 @@
 name: Project health check
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "30 6 * * 1"
   workflow_dispatch:
-
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27017
+      MONGODB_DB: pradhan_capitals_ci
+      SESSION_SECRET: ci-only-session-secret
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: ci-only-password-at-least-16
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - name: Install dependencies
-        run: npm install
-      - name: Check JavaScript syntax
-        run: npm test
-      - name: Check dependency advisories
-        run: npm audit --audit-level=high
-      - name: Start prototype and verify health endpoint
+      - run: npm install
+      - run: npm test
+      - run: npm audit --audit-level=high
+      - name: Check MongoDB API health
         run: |
           npm start > /tmp/pradhan-bank.log 2>&1 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 20); do
-            if curl --fail --silent http://127.0.0.1:3000/api/health; then
-              echo
-              exit 0
-            fi
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health | grep -q MongoDB; then exit 0; fi
             sleep 2
           done
           cat /tmp/pradhan-bank.log
