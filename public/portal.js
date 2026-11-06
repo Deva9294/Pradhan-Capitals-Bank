@@ -22,11 +22,12 @@ async function loadPortal(){
   $("#portalBranch").textContent=u.branchName||"Head Office";
   $("#userBadge").textContent=u.role.toUpperCase();
   const stats=await api("/api/portal/summary");
-  $("#statCards").innerHTML=stats.cards.map(x=>'<div class="card"><small class="muted">'+x.label+'</small><div class="metric">'+x.value+'</div></div>').join("");
+  $("#statCards").innerHTML=stats.cards.map(x=>'<div class="card"><small class="muted">'+escapeHtml(x.label)+'</small><div class="metric">'+escapeHtml(x.value)+'</div></div>').join("");
   $("#mainPanelTitle").textContent=stats.title;
   $("#mainPanelDescription").textContent=stats.description;
   $("#roleActions").innerHTML=stats.actions.map(x=>'<div class="card"><b>'+x.title+'</b><p class="muted">'+x.description+'</p></div>').join("");
   if(u.role!=="headquarters"&&u.role!=="manager")$("#createUserCard").classList.add("hidden");
+  if(["customer","staff"].includes(u.role))$("#directoryCard").classList.add("hidden");
   if(u.role==="manager")$("#newRole").innerHTML='<option value="staff">Branch staff</option>';
   if(u.role==="manager")$("#newBranch").value=u.branchName||"";
   if(u.role==="manager")$("#newBranch").readOnly=true;
