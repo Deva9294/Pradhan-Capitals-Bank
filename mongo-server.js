@@ -12,7 +12,7 @@ const app=express();
 const client=new MongoClient(process.env.MONGODB_URI||"mongodb://127.0.0.1:27017");
 const dbName=process.env.MONGODB_DB||"pradhan_capitals";
 let db;
-const roles=["customer","branch","staff","manager","headquarters"];
+const roles=["customer","branch","staff","manager","cashier","headquarters","admin"];
 if(process.env.NODE_ENV==="production"&&(!process.env.MONGODB_URI||!process.env.SESSION_SECRET))throw new Error("Set MONGODB_URI and SESSION_SECRET.");
 
 app.disable("x-powered-by");
@@ -38,6 +38,11 @@ async function initialise(){
  await logs().createIndex({createdAt:-1});
  await requests().createIndex({reference:1},{unique:true});
  await requests().createIndex({userId:1,status:1});
+ const siteAdminEmail=process.env.BOOTSTRAP_SITE_ADMIN_EMAIL?.trim().toLowerCase();
+ if(siteAdminEmail&&process.env.BOOTSTRAP_SITE_ADMIN_PASSWORD&&!await users().findOne({email:siteAdminEmail})){
+  const inserted=await users().insertOne({name:"Website Administrator",email:siteAdminEmail,passwordHash:await bcrypt.hash(process.env.BOOTSTRAP_SITE_ADMIN_PASSWORD,12),role:"admin",branchName:"Website Administration",isActive:true,createdAt:new Date()});
+  await audit({id:String(inserted.insertedId),name:"System"},"BOOTSTRAP_SITE_ADMIN","Website administrator provisioned");
+ }
  const email=process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
  if(email&&process.env.BOOTSTRAP_ADMIN_PASSWORD&&!await users().findOne({email})){
   const inserted=await users().insertOne({name:"Headquarters Administrator",email,passwordHash:await bcrypt.hash(process.env.BOOTSTRAP_ADMIN_PASSWORD,12),role:"headquarters",branchName:"Head Office",isActive:true,createdAt:new Date()});
@@ -68,11 +73,12 @@ app.get("/api/portal/summary",signed,async(req,res)=>{
  const grouped=await users().aggregate([{$match:{isActive:true}},{$group:{_id:"$role",total:{$sum:1}}}]).toArray();
  const counts=Object.fromEntries(grouped.map(x=>[x._id,x.total]));
  let cards;
- if(r==="headquarters")cards=[{label:"Total demo users",value:counts.customer||0},{label:"Branches",value:counts.branch||0},{label:"Managers",value:counts.manager||0},{label:"Staff accounts",value:counts.staff||0}];
+ if(r==="headquarters")cards=[{label:"Total demo users",value:counts.customer||0},{label:"Branches",value:counts.branch||0},{label:"Managers",value:counts.manager||0},{label:"Staff accounts",value:counts.staff||0},{label:"Cashier accounts",value:counts.cashier||0}];
+ else if(r==="admin")cards=[{label:"Website role",value:"Administrator"},{label:"Management access",value:"Website"},{label:"Financial operations",value:"Disabled"},{label:"Mode",value:"Prototype"}];
  else if(r==="customer")cards=[{label:"Profile",value:"Active"},{label:"Demo requests",value:await requests().countDocuments({userId:new ObjectId(u.id)})},{label:"Service mode",value:"Simulation"},{label:"Portal",value:"Customer"}];
- else {const team=await users().countDocuments({branchName:u.branchName,role:{$in:["branch","manager","staff"]},isActive:true});cards=[{label:"Branch",value:u.branchName||"Unassigned"},{label:"Branch team",value:team},{label:"Demo requests",value:0},{label:"Workspace",value:"Active"}];}
- const titles={headquarters:"Headquarters control centre",branch:"Branch operations dashboard",staff:"Branch staff dashboard",manager:"Branch manager dashboard",customer:"Customer dashboard"};
- const actionSets={headquarters:[{title:"Organisation directory",description:"Review employee and branch accounts in MongoDB."},{title:"Access governance",description:"Provision role-based demo logins."},{title:"Platform oversight",description:"Review organisation-wide prototype metrics."},{title:"Audit trail",description:"Review recent administrative activity."}],branch:[{title:"Branch operations",description:"Review branch workspace and assigned team."},{title:"Service desk",description:"Explore sample service workflows."}],staff:[{title:"Staff workspace",description:"Explore customer assistance demo workflows."}],manager:[{title:"Team oversight",description:"Create staff accounts for your branch."},{title:"Branch activity",description:"Review branch-scoped audit events."}],customer:[{title:"My profile",description:"Review your demo customer profile."},{title:"Service requests",description:"Explore sample-only service requests."}]};res.json({title:titles[r],description:"Role-based demonstration workspace. All financial activity is simulated.",cards,actions:actionSets[r]||[]});
+ else {const team=await users().countDocuments({branchName:u.branchName,role:{$in:["branch","manager","staff","cashier"]},isActive:true});cards=[{label:"Branch",value:u.branchName||"Unassigned"},{label:"Branch team",value:team},{label:"Demo requests",value:0},{label:"Workspace",value:"Active"}];}
+ const titles={admin:"Website administration dashboard",headquarters:"Headquarters control centre",branch:"Branch operations dashboard",staff:"Branch staff dashboard",manager:"Branch manager dashboard",customer:"Customer dashboard"};
+ const actionSets={admin:[{title:"Website administration",description:"Website administrator portal. Content publishing and settings tools can be added here."},{title:"Site health",description:"Review deployment and public website availability."},{title:"Security boundary",description:"No access to HQ, branch, manager, staff or cashier account provisioning."}],headquarters:[{title:"Organisation directory",description:"Review employee and branch accounts in MongoDB."},{title:"Access governance",description:"Provision role-based demo logins."},{title:"Platform oversight",description:"Review organisation-wide prototype metrics."},{title:"Audit trail",description:"Review recent administrative activity."}],branch:[{title:"Branch operations",description:"Review branch workspace and assigned team."},{title:"Service desk",description:"Explore sample service workflows."}],staff:[{title:"Staff workspace",description:"Explore customer assistance demo workflows."}],manager:[{title:"Team oversight",description:"Create staff accounts for your branch."},{title:"Branch activity",description:"Review branch-scoped audit events."}],customer:[{title:"My profile",description:"Review your demo customer profile."},{title:"Service requests",description:"Explore sample-only service requests."}]};res.json({title:titles[r],description:"Role-based demonstration workspace. All financial activity is simulated.",cards,actions:actionSets[r]||[]});
 });
 app.get("/api/portal/users",permit("headquarters","manager","branch"),async(req,res)=>{
  const u=req.session.user,filter=u.role==="headquarters"?{}:{branchName:u.branchName||""};
@@ -83,7 +89,7 @@ app.get("/api/portal/users",permit("headquarters","manager","branch"),async(req,
 });
 app.post("/api/portal/users",permit("headquarters","manager"),async(req,res)=>{try{
  const {name,email,password,role,branchName}=req.body||{},actor=req.session.user;
- const allowed=actor.role==="headquarters"?["branch","manager","staff"].includes(role):role==="staff";
+ const allowed=actor.role==="headquarters"?["branch","manager","staff","cashier"].includes(role):role==="staff";
  if(!allowed)return res.status(403).json({error:"You cannot create this role."});
  if(typeof name!=="string"||name.trim().length<2||!emailOk(email)||typeof password!=="string"||password.length<10||password.length>128)return res.status(400).json({error:"Enter valid account details."});
  const branch=actor.role==="manager"?actor.branchName:String(branchName||"").trim().slice(0,100);
