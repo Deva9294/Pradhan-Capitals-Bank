@@ -40,15 +40,42 @@ No database or payment credentials are required for this demo prototype. Do not 
 
 GitHub Actions runs the validation workflow on pushes and pull requests to `main`, and weekly on Monday. It installs dependencies, runs `npm test`, checks npm advisories at high severity, and starts the app to probe `/api/health`. Dependabot checks npm dependencies weekly and can open update pull requests. Workflow results are visible in the repository's **Actions** tab; this does not send a ChatGPT notification.
 
+## Role-based PostgreSQL portal
+
+The portal now supports five database-backed roles:
+
+- **Customer:** self-registration, customer login and personal demo workspace.
+- **Branch operator:** branch-scoped directory and operational overview.
+- **Branch staff:** staff login and branch workspace.
+- **Branch manager:** branch-scoped team visibility and ability to create staff demo logins for their own branch.
+- **Headquarters:** organisation-wide user directory, audit activity, and provisioning of branch, manager and staff demo logins.
+
+### Database and first headquarters login
+
+The server creates the required PostgreSQL tables on startup: `users`, `audit_logs`, `demo_requests`, and the PostgreSQL-backed session store. Passwords are hashed with bcrypt; sessions are stored in PostgreSQL and delivered through HttpOnly, SameSite cookies. Role permissions are checked on the server for every protected API.
+
+After creating the Render Blueprint, open the web service's **Environment** settings and add:
+
+- `BOOTSTRAP_ADMIN_EMAIL`: the email for the initial Headquarters administrator.
+- `BOOTSTRAP_ADMIN_PASSWORD`: a unique password of at least 16 characters.
+
+Redeploy the web service. On first startup, the app creates this Headquarters account if that email does not already exist. Keep these values private and do not commit them to GitHub. Then open `/login/headquarters`, sign in, and create branch, manager and staff demo accounts. Customers can register at `/login/customer`.
+
+Portal routes:
+- `/login/customer`, `/login/branch`, `/login/staff`, `/login/manager`, `/login/headquarters`
+- `/dashboard/customer`, `/dashboard/branch`, `/dashboard/staff`, `/dashboard/manager`, `/dashboard/headquarters`
+
+The Render Blueprint provisions a PostgreSQL database using the `basic-256mb` plan. Review the current database price and billing terms in Render before applying the Blueprint. The web service itself is configured on the free plan.
+
 ## Important safety boundary
 All balances, interest rates, references and transfers are fictitious. The demo login accepts any non-empty username/password and does not authenticate a real customer. Demo bearer tokens are random, held only in server memory, and expire after 15 minutes; a server restart or instance replacement clears them. This in-memory design is not suitable for a multi-instance deployment. This is prototype session plumbing, not production-grade identity or authentication. No funds move, no accounts are opened, no KYC is performed and no identity documents should be uploaded. The app must not be represented as an RBI-regulated bank or used to collect real customer data.
 
 ## Production integration roadmap (requires authorised banking partner and regulatory/legal review)
-- Replace demo login with an audited identity provider, MFA, short-lived server-side sessions, CSRF protection, secure cookies, device risk checks and account lockout.
+- Replace demo credentials with an audited identity provider, MFA, CSRF protection, device risk checks, account lockout, password reset and security monitoring. Current sessions are prototype-grade PostgreSQL sessions, not a certification of production security.
 - Use a regulated bank / licensed banking partner for account issuance, payment rails and ledger operations. Never implement a pretend core ledger as a substitute.
 - Integrate KYC only through approved provider APIs with consent, data minimisation, encryption at rest, retention controls and audit trails. Do not store Aadhaar/PAN in browser storage or logs.
 - Build a double-entry ledger with immutable journal entries, idempotency keys, reconciliation, maker-checker approvals and daily settlement controls in a properly reviewed financial backend.
-- Use PostgreSQL with migrations, least-privilege service accounts, encrypted backups, secrets manager, WAF, TLS, monitoring and incident response.
+- Add versioned database migrations, least-privilege service accounts, encrypted backups, secrets manager, WAF, TLS, monitoring and incident response. Current tables are created at startup for this prototype and do not yet use a migration framework.
 - Add API contract tests, unit/integration tests, dependency scanning, SAST/DAST, penetration testing and independent security review before any real-world use.
 
 ## Suggested service boundaries
