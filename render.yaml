@@ -1,10 +1,3 @@
-databases:
-  - name: pradhan-capitals-db
-    databaseName: pradhan_capitals
-    user: pradhan_capitals_user
-    plan: basic-256mb
-    postgresMajorVersion: "16"
-
 services:
   - type: web
     name: pradhan-capitals-bank
@@ -18,9 +11,13 @@ services:
         value: 20.19.0
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: pradhan-capitals-db
-          property: connectionString
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: pradhan_capitals
       - key: SESSION_SECRET
         generateValue: true
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
