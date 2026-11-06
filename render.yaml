@@ -19,6 +19,10 @@ services:
         value: pradhan_capitals
       - key: SESSION_SECRET
         generateValue: true
+      - key: BOOTSTRAP_SITE_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_SITE_ADMIN_PASSWORD
+        sync: false
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
       - key: BOOTSTRAP_ADMIN_PASSWORD
