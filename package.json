@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node mongo-server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/portal.js",
+    "check": "node --check server.js && node --check mongo-server.js && node --check public/app.js && node --check public/portal.js",
     "test": "npm run check"
   },
   "engines": {
