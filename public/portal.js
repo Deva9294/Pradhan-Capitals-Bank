@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);
-const roleNames={customer:"Customer",branch:"Branch Operations",staff:"Branch Staff",manager:"Branch Manager",headquarters:"Headquarters"};
+const roleNames={customer:"Customer",branch:"Branch Operations",staff:"Branch Staff",manager:"Branch Manager",cashier:"Cashier",headquarters:"Headquarters",admin:"Website Administrator"};
 const role=location.pathname.split("/").pop();
 const showMessage=(id,msg)=>{const el=$(id);if(el)el.textContent=msg};
 async function api(url,options={}){const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(options.headers||{})},...options});const d=await r.json().catch(()=>({error:"Unexpected server response"}));if(!r.ok)throw new Error(d.error||"Request failed");return d}
@@ -27,7 +27,7 @@ async function loadPortal(){
   $("#mainPanelDescription").textContent=stats.description;
   $("#roleActions").innerHTML=stats.actions.map(x=>'<div class="card"><b>'+x.title+'</b><p class="muted">'+x.description+'</p></div>').join("");
   if(u.role!=="headquarters"&&u.role!=="manager")$("#createUserCard").classList.add("hidden");
-  if(["customer","staff"].includes(u.role))$("#directoryCard").classList.add("hidden");
+  if(["customer","staff","cashier","admin"].includes(u.role))$("#directoryCard").classList.add("hidden");
   if(u.role==="manager")$("#newRole").innerHTML='<option value="staff">Branch staff</option>';
   if(u.role==="manager")$("#newBranch").value=u.branchName||"";
   if(u.role==="manager")$("#newBranch").readOnly=true;
