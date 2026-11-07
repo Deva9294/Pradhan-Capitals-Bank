@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     # Keep these commands explicit for the existing Render service configuration.
-    buildCommand: yarn install
+    buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /api/health
     autoDeploy: true
