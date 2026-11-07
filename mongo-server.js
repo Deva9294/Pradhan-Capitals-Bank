@@ -33,6 +33,7 @@ let db;
 if (process.env.NODE_ENV === "production" && (!process.env.MONGODB_URI || !process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) {
   throw new Error("Production requires MONGODB_URI and a SESSION_SECRET of at least 32 characters.");
 }
+const clientPromise = client.connect();
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -48,7 +49,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   rolling: true,
-  store: MongoStore.create({ client, dbName, collectionName: "sessions", ttl: 900 }),
+  store: MongoStore.create({ clientPromise, dbName, collectionName: "sessions", ttl: 900 }),
   cookie: {
     httpOnly: true,
     sameSite: "lax",
@@ -128,7 +129,7 @@ async function bootstrapAccount(emailValue, passwordValue, role, name, branchNam
   await audit({ id: String(result.insertedId), name: "System" }, "BOOTSTRAP_ACCOUNT", role + " account provisioned");
 }
 async function initialise() {
-  await client.connect();
+  await clientPromise;
   db = client.db(dbName);
   await Promise.all([
     users().createIndex({ email: 1 }, { unique: true }),
