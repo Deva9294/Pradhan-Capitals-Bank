@@ -110,12 +110,15 @@ function saveSession(req, res, payload) {
 }
 async function bootstrapAccount(emailValue, passwordValue, role, name, branchName) {
   const email = emailValue?.trim().toLowerCase();
-  if (!email || !passwordValue) return;
-  if (!emailOk(email) || passwordValue.length < 16) throw new Error("Bootstrap account credentials are invalid or password is too short.");
+  if (!email && !passwordValue) return;
+  if (!emailOk(email)) throw new Error("Bootstrap account email is invalid.");
   const existing = await users().findOne({ email });
   if (existing) {
     if (existing.role !== role) throw new Error("Bootstrap email is already assigned to a different role.");
     return;
+  }
+  if (typeof passwordValue !== "string" || passwordValue.length < 16) {
+    throw new Error("A new bootstrap account requires a password of at least 16 characters.");
   }
   const result = await users().insertOne({
     name,
