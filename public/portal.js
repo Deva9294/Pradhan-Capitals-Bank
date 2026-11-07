@@ -300,34 +300,3 @@ $("#logoutBtn")?.addEventListener("click", async () => {
 
 loadPortal();
 
-(async function applyPublicSiteSettings() {
-  if ($("#publicAnnouncement") || $("#homeHeroTitle") || $("#siteBrandName")) {
-    try {
-      const data = await api("/api/site-settings");
-      const settings = data.settings || {};
-      const textTargets = {
-        publicAnnouncement: settings.announcement,
-        homeHeroTitle: settings.heroTitle,
-        homeHeroDescription: settings.heroDescription,
-        siteBrandName: settings.siteName,
-        siteTagline: settings.tagline,
-        siteFooterNotice: settings.footerText,
-        supportEmailLink: settings.supportEmail,
-        supportPhoneText: settings.supportPhone
-      };
-      for (const [id, value] of Object.entries(textTargets)) {
-        const element = $("#" + id);
-        if (!element || !value) continue;
-        if (id === "supportEmailLink") {
-          element.textContent = value;
-          element.href = "mailto:" + value;
-        } else if (id === "supportPhoneText") {
-          element.textContent = value;
-        } else element.textContent = value;
-      }
-      if (settings.siteName) document.title = settings.siteName + " | Banking Experience Prototype";
-    } catch (error) {
-      // Static fallback content remains available if the database is temporarily unavailable.
-    }
-  }
-})();
