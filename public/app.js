@@ -128,3 +128,38 @@ $("#loanEnquiryForm")?.addEventListener("submit", async event => {
     button.disabled = false;
   }
 });
+
+
+// Public homepage content is editable by Website Admin and read from MongoDB.
+(async function applyPublicSiteSettings() {
+  if (!$("#publicAnnouncement") && !$("#homeHeroTitle") && !$("#siteBrandName")) return;
+  try {
+    const response = await fetch("/api/site-settings", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const data = await response.json();
+    const settings = data.settings || {};
+    const targets = {
+      publicAnnouncement: settings.announcement,
+      homeHeroTitle: settings.heroTitle,
+      homeHeroDescription: settings.heroDescription,
+      siteBrandName: settings.siteName,
+      siteTagline: settings.tagline,
+      siteFooterNotice: settings.footerText,
+      supportEmailLink: settings.supportEmail,
+      supportPhoneText: settings.supportPhone
+    };
+    for (const [id, value] of Object.entries(targets)) {
+      const element = $("#" + id);
+      if (!element || !value) continue;
+      if (id === "supportEmailLink") {
+        element.textContent = value;
+        element.href = "mailto:" + value;
+      } else {
+        element.textContent = value;
+      }
+    }
+    if (settings.siteName) document.title = settings.siteName + " | Banking Experience Prototype";
+  } catch (error) {
+    // Keep static fallback content visible when the database is unavailable.
+  }
+})();
