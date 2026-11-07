@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE_URL="\${BASE_URL:-http://127.0.0.1:3000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:3000}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 expect() {
@@ -13,11 +13,11 @@ expect() {
   echo "PASS: $label"
 }
 request() {
-  local method="$1" cookie="$2" path="$3" payload="\${4:-}"
+  local method="$1" cookie="$2" path="$3" payload="${4:-}"
   local args=(-sS -o "$TMP_DIR/body.json" -w "%{http_code}" -X "$method" "$BASE_URL$path")
   if [[ -n "$cookie" ]]; then args+=(-b "$cookie" -c "$cookie"); fi
   if [[ -n "$payload" ]]; then args+=(-H "Content-Type: application/json" -d "$payload"); fi
-  HTTP_CODE="$(curl "\${args[@]}")"
+  HTTP_CODE="$(curl "${args[@]}")"
 }
 login() {
   local role="$1" email="$2" password="$3" cookie="$4"
