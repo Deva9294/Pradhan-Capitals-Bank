@@ -63,7 +63,24 @@ const logs = () => db.collection("audit_logs");
 const requests = () => db.collection("demo_requests");
 const siteSettings = () => db.collection("site_settings");
 const emailOk = value => typeof value === "string" && value.length <= 160 && /^\S+@\S+\.\S+$/.test(value);
-const signed = (req, res, next) => req.session.user ? next() : res.status(401).json({ error: "Please sign in." });
+const signed = async (req, res, next) => {
+  if (!req.session.user) return res.status(401).json({ error: "Please sign in." });
+  try {
+    const active = await users().findOne(
+      { _id: new ObjectId(req.session.user.id), isActive: true },
+      { projection: { _id: 1 } }
+    );
+    if (!active) {
+      return req.session.destroy(() => {
+        res.clearCookie("pcb.sid");
+        res.status(401).json({ error: "This account is inactive. Contact your administrator." });
+      });
+    }
+    next();
+  } catch (error) {
+    res.status(503).json({ error: "Could not verify your account status." });
+  }
+};
 const permit = (...allowed) => (req, res, next) => signed(req, res, () =>
   allowed.includes(req.session.user.role) ? next() : res.status(403).json({ error: "Not permitted." })
 );
@@ -155,7 +172,7 @@ app.get("/api/health", async (req, res) => {
 
 app.get("/api/site-settings", async (req, res) => {
   try {
-    const stored = await siteSettings().findOne({ key: "public" }, { projection: { _id: 0, key: 0 } });
+    const stored = await siteSettings().findOne({ key: "public" }, { projection: { _id: 0, key: 0, updatedBy: 0, updatedAt: 0 } });
     res.set("Cache-Control", "no-store").json({ settings: { ...defaultSiteSettings, ...(stored || {}) } });
   } catch (error) {
     res.status(503).json({ error: "Website settings are temporarily unavailable." });
@@ -399,6 +416,7 @@ app.patch("/api/portal/users/:id/status", permit("headquarters"), async (req, re
     if (typeof isActive !== "boolean") return res.status(400).json({ error: "isActive must be true or false." });
     const target = await users().findOne({ _id: new ObjectId(req.params.id) });
     if (!target) return res.status(404).json({ error: "User not found." });
+    if (target.role === "admin") return res.status(403).json({ error: "Website Admin accounts are managed separately." });
     if (target.role === "headquarters" && target.email === req.session.user.email) {
       return res.status(400).json({ error: "You cannot deactivate your own HQ account." });
     }
@@ -465,6 +483,8 @@ app.patch("/api/requests/:id/status", permit("headquarters", "branch", "manager"
     res.status(500).json({ error: "Could not update request status." });
   }
 });
+
+app.use("/api", (req, res) => res.status(404).json({ error: "API route not found." }));
 
 app.get("/robots.txt", (req, res) => res.type("text").send(
   "User-agent: *\nAllow: /\nDisallow: /login/\nDisallow: /dashboard/\nSitemap: /sitemap.xml\n"
