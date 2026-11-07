@@ -1,0 +1,45 @@
+name: End-to-end role workflow tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27017
+      MONGODB_DB: pradhan_capitals_e2e
+      SESSION_SECRET: ci-only-session-secret-at-least-32-chars
+      BOOTSTRAP_ADMIN_EMAIL: hq@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: ci-only-hq-password-at-least-16
+      BOOTSTRAP_SITE_ADMIN_EMAIL: siteadmin@example.com
+      BOOTSTRAP_SITE_ADMIN_PASSWORD: ci-only-site-admin-password-16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - run: npm install
+      - run: npm test
+      - run: npm audit --audit-level=high
+      - name: Start application and test all role workflows
+        run: |
+          npm start > /tmp/pradhan-bank.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health | grep -q MongoDB; then break; fi
+            sleep 2
+          done
+          if ! curl --fail --silent http://127.0.0.1:3000/api/health | grep -q MongoDB; then
+            cat /tmp/pradhan-bank.log
+            exit 1
+          fi
+          bash scripts/e2e-smoke.sh
