@@ -489,6 +489,16 @@ app.patch("/api/requests/:id/status", permit("headquarters", "branch", "manager"
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "API route not found." }));
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600 ? error.status : 500;
+  if (req.originalUrl.startsWith("/api/")) {
+    return res.status(status).json({
+      error: status === 400 ? "Invalid request body." : "The server could not complete this request."
+    });
+  }
+  res.status(status).send("The server could not complete this request.");
+});
 
 app.get("/robots.txt", (req, res) => res.type("text").send(
   "User-agent: *\nAllow: /\nDisallow: /login/\nDisallow: /dashboard/\nSitemap: /sitemap.xml\n"
