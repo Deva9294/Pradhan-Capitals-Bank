@@ -96,8 +96,10 @@ async function loadDirectory() {
     const active = user.is_active !== false;
     const action = user.role === "headquarters"
       ? "Protected HQ account"
-      : '<button class="btn outline user-status-btn" type="button" data-id="' + escapeHtml(user.id) +
-        '" data-active="' + String(active) + '">' + (active ? "Deactivate" : "Activate") + "</button>";
+      : user.role === "admin"
+        ? "Managed separately"
+        : '<button class="btn outline user-status-btn" type="button" data-id="' + escapeHtml(user.id) +
+          '" data-active="' + String(active) + '">' + (active ? "Deactivate" : "Activate") + "</button>";
     return "<tr><td>" + escapeHtml(user.name) + "</td><td>" + escapeHtml(user.email) +
       "</td><td>" + escapeHtml(user.role) + "</td><td>" + escapeHtml(user.branch_name || "—") +
       "</td><td>" + (active ? "Active" : "Inactive") + "</td><td>" + escapeHtml(formatDate(user.created_at)) +
