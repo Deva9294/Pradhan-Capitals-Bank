@@ -978,7 +978,8 @@ app.post("/api/banking/loans/:id/repay", permit("customer"), async (req, res) =>
       }, $unset: { repaymentStartedAt: "" } }
     );
     if (!updated.modifiedCount) throw new Error("Could not complete installment update.");
-    await audit(req.session.user, "DEMO_LOAN_EMI_PAID", installmentReference + " / ₹" + inr(emiPaise));
+    claimedLoan = null;
+    await audit(req.session.user, "DEMO_LOAN_EMI_PAID", installmentReference + " / ₹" + inr(emiPaise)).catch(() => {});
     return res.json({
       ok: true, mode: "DEMO", reference: loan.reference, installmentReference,
       installmentNumber: nextPaid, paidAmount: inr(emiPaise),
