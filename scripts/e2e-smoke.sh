@@ -139,7 +139,7 @@ request PATCH "$MANAGER_COOKIE" "/api/banking/cash-operations/$CASH_ID/approve" 
 expect 200 "$HTTP_CODE" "Manager approves branch cash deposit"
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "Approved cash deposit updates demo balance"
-jq -e '.account.balance == 33600' "$TMP_DIR/body.json" >/dev/null
+jq -e --argjson before "$BALANCE_AFTER_EMI" '.account.balance == ($before + 100)' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/requests"
 expect 200 "$HTTP_CODE" "Customer reads own requests"
 REQUEST_ID="$(jq -r --arg ref "$REQUEST_REF" '.requests[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
