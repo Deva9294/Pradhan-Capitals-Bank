@@ -148,6 +148,52 @@ async function loadBanking() {
     "</td><td>" + escapeHtml(item.status) + "</td></tr>"
   ).join("") || '<tr><td colspan="6">No transactions yet.</td></tr>';
 }
+
+function money(value) {
+  return "₹" + Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+async function loadBeneficiaries() {
+  const data = await api("/api/banking/beneficiaries");
+  $("#beneficiaryRows").innerHTML = (data.beneficiaries || []).map(item =>
+    "<tr><td>" + escapeHtml(item.name) + "</td><td>" + escapeHtml(item.accountNumber) +
+    '</td><td><button class="btn outline beneficiary-use" type="button" data-account="' + escapeHtml(item.accountNumber) +
+    '">Use</button> <button class="btn outline beneficiary-remove" type="button" data-id="' + escapeHtml(item.id) + '">Remove</button></td></tr>'
+  ).join("") || '<tr><td colspan="3">No saved beneficiaries.</td></tr>';
+}
+async function loadFixedDeposits() {
+  const data = await api("/api/banking/fixed-deposits");
+  $("#fdRows").innerHTML = (data.fixedDeposits || []).map(item =>
+    "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + money(item.principal) +
+    "</td><td>" + escapeHtml(item.rate) + "%</td><td>" + escapeHtml(item.tenureMonths) +
+    " months</td><td>" + money(item.maturityAmount) + "</td><td>" + escapeHtml(formatDate(item.maturityAt)) +
+    "</td><td>" + escapeHtml(item.status) + "</td></tr>"
+  ).join("") || '<tr><td colspan="7">No fixed deposits yet.</td></tr>';
+}
+async function loadLoans() {
+  const data = await api("/api/banking/loans");
+  const items = data.loans || [];
+  if ($("#myLoanRows")) {
+    $("#myLoanRows").innerHTML = items.map(item =>
+      "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + money(item.amount) +
+      "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
+      escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
+      "</td><td>" + escapeHtml(formatDate(item.createdAt)) + "</td></tr>"
+    ).join("") || '<tr><td colspan="6">No demo applications yet.</td></tr>';
+  }
+  if ($("#loanRows")) {
+    const canDecide = ["headquarters", "branch", "manager"].includes(window.currentPortalRole);
+    $("#loanRows").innerHTML = items.map(item => {
+      const action = canDecide && item.status === "pending"
+        ? '<button class="btn loan-decision" type="button" data-id="' + escapeHtml(item.id) + '" data-decision="approve">Approve</button> <button class="btn outline loan-decision" type="button" data-id="' + escapeHtml(item.id) + '" data-decision="reject">Reject</button>'
+        : "—";
+      return "<tr><td>" + escapeHtml(item.reference) + "</td><td>" +
+        escapeHtml(item.customerName || "Demo customer") + "</td><td>" + money(item.amount) +
+        "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
+        escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
+        "</td><td>" + action + "</td></tr>";
+    }).join("") || '<tr><td colspan="7">No demo loan applications.</td></tr>';
+  }
+}
 async function loadCashOperations() {
   const data = await api("/api/banking/cash-operations");
   const role = window.currentPortalRole;
@@ -206,6 +252,15 @@ async function loadPortal() {
     if (role === "customer") {
       $("#customerBankingCard").classList.remove("hidden");
       await loadBanking();
+    }
+    if (role === "customer") {
+      $("#customerProductsCard").classList.remove("hidden");
+      $("#customerLoanCard").classList.remove("hidden");
+      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadLoans()]);
+    }
+    if (["headquarters", "branch", "manager"].includes(role)) {
+      $("#loanOperationsCard").classList.remove("hidden");
+      await loadLoans();
     }
     if (["cashier", "branch", "manager", "headquarters"].includes(role)) {
       $("#cashierBankingCard").classList.remove("hidden");
@@ -319,6 +374,88 @@ $("#cashOperationRows")?.addEventListener("click", async event => {
     await loadCashOperations();
   } catch (error) {
     showMessage("#cashOperationMessage", error.message);
+    button.disabled = false;
+  }
+});
+
+$("#beneficiaryForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#beneficiaryMessage", "Saving beneficiary…");
+  try {
+    const result = await api("/api/banking/beneficiaries", {
+      method: "POST", body: JSON.stringify({
+        name: $("#beneficiaryName").value,
+        accountNumber: $("#beneficiaryAccount").value
+      })
+    });
+    showMessage("#beneficiaryMessage", "Saved: " + result.beneficiary.accountNumber);
+    event.target.reset();
+    await loadBeneficiaries();
+  } catch (error) { showMessage("#beneficiaryMessage", error.message); }
+});
+$("#beneficiaryRows")?.addEventListener("click", async event => {
+  const use = event.target.closest(".beneficiary-use");
+  if (use) {
+    $("#transferAccount").value = use.dataset.account;
+    $("#transferAccount").focus();
+    showMessage("#transferMessage", "Beneficiary selected. Enter amount to continue.");
+    return;
+  }
+  const remove = event.target.closest(".beneficiary-remove");
+  if (!remove) return;
+  remove.disabled = true;
+  try {
+    await api("/api/banking/beneficiaries/" + encodeURIComponent(remove.dataset.id), { method: "DELETE" });
+    await loadBeneficiaries();
+  } catch (error) {
+    showMessage("#beneficiaryMessage", error.message);
+    remove.disabled = false;
+  }
+});
+$("#fdForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#fdMessage", "Opening simulated fixed deposit…");
+  try {
+    const result = await api("/api/banking/fixed-deposits", {
+      method: "POST", body: JSON.stringify({ amount: $("#fdAmount").value, tenureMonths: $("#fdTenure").value })
+    });
+    showMessage("#fdMessage", "Demo FD opened: " + result.reference + " · Maturity estimate " + money(result.maturityAmount));
+    event.target.reset();
+    await Promise.all([loadBanking(), loadFixedDeposits()]);
+  } catch (error) { showMessage("#fdMessage", error.message); }
+});
+$("#refreshFDs")?.addEventListener("click", async () => {
+  await Promise.all([loadFixedDeposits(), loadBanking()]);
+});
+$("#loanForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#loanMessage", "Submitting demo loan application…");
+  try {
+    const result = await api("/api/banking/loans", {
+      method: "POST", body: JSON.stringify({
+        amount: $("#loanAmount").value, tenureMonths: $("#loanTenure").value,
+        purpose: $("#loanPurpose").value
+      })
+    });
+    showMessage("#loanMessage", "Application submitted: " + result.reference + " · Pending demo review.");
+    event.target.reset();
+    await loadLoans();
+  } catch (error) { showMessage("#loanMessage", error.message); }
+});
+$("#refreshMyLoans")?.addEventListener("click", loadLoans);
+$("#refreshLoans")?.addEventListener("click", loadLoans);
+$("#loanRows")?.addEventListener("click", async event => {
+  const button = event.target.closest(".loan-decision");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/banking/loans/" + encodeURIComponent(button.dataset.id) + "/decision", {
+      method: "PATCH", body: JSON.stringify({ decision: button.dataset.decision, note: "Demo workflow decision" })
+    });
+    showMessage("#loanOperationsMessage", result.reference + " · " + result.status);
+    await loadLoans();
+  } catch (error) {
+    showMessage("#loanOperationsMessage", error.message);
     button.disabled = false;
   }
 });
