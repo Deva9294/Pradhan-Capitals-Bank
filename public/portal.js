@@ -177,7 +177,9 @@ async function loadLoans() {
       "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + money(item.amount) +
       "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
       escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
-      "</td><td>" + escapeHtml(formatDate(item.createdAt)) + "</td></tr>"
+      (item.emi ? " · EMI " + money(item.emi) + " · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) + " · Due " + escapeHtml(item.outstanding === null ? "—" : money(item.outstanding)) : "") +
+      "</td><td>" + escapeHtml(formatDate(item.createdAt)) +
+      (item.status === "approved" ? '</td><td>' + money(item.emi) + ' <button class="btn loan-repay" type="button" data-id="' + escapeHtml(item.id) + '">Pay EMI</button>' : "</td><td>—") + "</td></tr>"
     ).join("") || '<tr><td colspan="6">No demo applications yet.</td></tr>';
   }
   if ($("#loanRows")) {
@@ -190,6 +192,7 @@ async function loadLoans() {
         escapeHtml(item.customerName || "Demo customer") + "</td><td>" + money(item.amount) +
         "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
         escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
+        (item.emi ? " · EMI " + money(item.emi) + " · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) : "") +
         "</td><td>" + action + "</td></tr>";
     }).join("") || '<tr><td colspan="7">No demo loan applications.</td></tr>';
   }
@@ -441,6 +444,24 @@ $("#loanForm")?.addEventListener("submit", async event => {
     event.target.reset();
     await loadLoans();
   } catch (error) { showMessage("#loanMessage", error.message); }
+});
+
+$("#myLoanRows")?.addEventListener("click", async event => {
+  const button = event.target.closest(".loan-repay");
+  if (!button) return;
+  button.disabled = true;
+  showMessage("#loanMessage", "Processing demo EMI payment…");
+  try {
+    const result = await api("/api/banking/loans/" + encodeURIComponent(button.dataset.id) + "/repay", {
+      method: "POST", body: "{}"
+    });
+    showMessage("#loanMessage", "EMI " + result.installmentNumber + " paid: " + money(result.paidAmount) +
+      " · Outstanding " + money(result.outstanding) + " · " + result.status);
+    await Promise.all([loadLoans(), loadBanking()]);
+  } catch (error) {
+    showMessage("#loanMessage", error.message);
+    button.disabled = false;
+  }
 });
 $("#refreshMyLoans")?.addEventListener("click", loadLoans);
 $("#refreshLoans")?.addEventListener("click", loadLoans);
