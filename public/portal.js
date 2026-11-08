@@ -131,6 +131,38 @@ async function loadRequests() {
       "</td><td>" + escapeHtml(formatDate(item.createdAt)) + "</td><td>" + action + "</td></tr>";
   }).join("") || '<tr><td colspan="7">No demo requests found.</td></tr>';
 }
+
+async function loadBanking() {
+  const data = await api("/api/banking/account");
+  const account = data.account;
+  $("#bankBalance").textContent = "₹" + Number(account.balance).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+  $("#bankAccountNumber").textContent = account.accountNumber;
+  $("#bankIfsc").textContent = account.ifscDemo + " (demo)";
+  $("#bankAccountType").textContent = account.accountType.replaceAll("_", " ");
+  const statement = await api("/api/banking/transactions");
+  $("#bankTransactionRows").innerHTML = (statement.transactions || []).map(item =>
+    "<tr><td>" + escapeHtml(formatDate(item.createdAt)) + "</td><td>" + escapeHtml(item.reference) +
+    "</td><td>" + escapeHtml((item.type || "").replaceAll("_", " ")) + "</td><td>" +
+    (item.direction === "debit" ? "Debit" : "Credit") + "</td><td>" +
+    (item.direction === "debit" ? "−" : "+") + "₹" + Number(item.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 }) +
+    "</td><td>" + escapeHtml(item.status) + "</td></tr>"
+  ).join("") || '<tr><td colspan="6">No transactions yet.</td></tr>';
+}
+async function loadCashOperations() {
+  const data = await api("/api/banking/cash-operations");
+  const role = window.currentPortalRole;
+  const canApprove = ["headquarters", "branch", "manager"].includes(role);
+  $("#cashOperationRows").innerHTML = (data.operations || []).map(item => {
+    const action = item.status === "pending" && canApprove
+      ? '<button class="btn outline cash-approve-btn" type="button" data-id="' + escapeHtml(item.id) + '">Approve</button>'
+      : "—";
+    return "<tr><td>" + escapeHtml(formatDate(item.createdAt)) + "</td><td>" + escapeHtml(item.reference) +
+      "</td><td>" + escapeHtml(item.accountNumber) + "</td><td>" +
+      escapeHtml(item.type.replaceAll("_", " ")) + "</td><td>₹" +
+      Number(item.amount).toLocaleString("en-IN", { minimumFractionDigits: 2 }) +
+      "</td><td>" + escapeHtml(item.status) + "</td><td>" + action + "</td></tr>";
+  }).join("") || '<tr><td colspan="7">No cash operations.</td></tr>';
+}
 async function loadPortal() {
   if (!$("#portalTitle")) return;
   try {
@@ -171,6 +203,14 @@ async function loadPortal() {
       await loadSiteSettingsForm();
     }
     if (role === "customer") $("#customerRequestCard").classList.remove("hidden");
+    if (role === "customer") {
+      $("#customerBankingCard").classList.remove("hidden");
+      await loadBanking();
+    }
+    if (["cashier", "branch", "manager", "headquarters"].includes(role)) {
+      $("#cashierBankingCard").classList.remove("hidden");
+      await loadCashOperations();
+    }
     if (["customer", "headquarters", "branch", "manager", "staff"].includes(role)) {
       $("#requestsCard").classList.remove("hidden");
       await loadRequests();
@@ -233,6 +273,55 @@ $("#siteSettingsForm")?.addEventListener("submit", async event => {
   }
 });
 
+
+$("#demoTransferForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#transferMessage", "Processing internal demo transfer…");
+  try {
+    const result = await api("/api/banking/transfer", {
+      method: "POST", body: JSON.stringify({
+        accountNumber: $("#transferAccount").value,
+        amount: $("#transferAmount").value,
+        note: $("#transferNote").value
+      })
+    });
+    showMessage("#transferMessage", "Demo transfer successful. Reference: " + result.reference + " · New balance ₹" + result.balance);
+    event.target.reset();
+    await loadBanking();
+  } catch (error) { showMessage("#transferMessage", error.message); }
+});
+$("#refreshBanking")?.addEventListener("click", loadBanking);
+$("#cashOperationForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#cashOperationMessage", "Submitting for approval…");
+  try {
+    const result = await api("/api/banking/cash-operations", {
+      method: "POST", body: JSON.stringify({
+        accountNumber: $("#cashAccount").value, type: $("#cashType").value,
+        amount: $("#cashAmount").value, note: $("#cashNote").value
+      })
+    });
+    showMessage("#cashOperationMessage", "Submitted: " + result.reference + " · Pending approval.");
+    event.target.reset();
+    await loadCashOperations();
+  } catch (error) { showMessage("#cashOperationMessage", error.message); }
+});
+$("#refreshCashOperations")?.addEventListener("click", loadCashOperations);
+$("#cashOperationRows")?.addEventListener("click", async event => {
+  const button = event.target.closest(".cash-approve-btn");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/banking/cash-operations/" + encodeURIComponent(button.dataset.id) + "/approve", {
+      method: "PATCH", body: JSON.stringify({})
+    });
+    showMessage("#cashOperationMessage", "Approved: " + result.reference);
+    await loadCashOperations();
+  } catch (error) {
+    showMessage("#cashOperationMessage", error.message);
+    button.disabled = false;
+  }
+});
 $("#customerRequestForm")?.addEventListener("submit", async event => {
   event.preventDefault();
   showMessage("#customerRequestMessage", "Submitting…");
