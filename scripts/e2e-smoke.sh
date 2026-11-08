@@ -126,6 +126,25 @@ jq -e '.account.balance == 33500' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
 expect 200 "$HTTP_CODE" "Passbook includes demo loan disbursement"
 jq -e --arg ref "$LOAN_REF" 'any(.transactions[]; .reference == $ref and .type == "demo_loan_disbursement")' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/loans"
+expect 200 "$HTTP_CODE" "Customer reads approved demo loan and EMI schedule"
+jq -e --arg ref "$LOAN_REF" 'any(.loans[]; .reference == $ref and .status == "approved" and .interestRate == 12 and .emi > 0 and .outstanding > 0 and .paidInstallments == 0)' "$TMP_DIR/body.json" >/dev/null
+LOAN_ID="$(jq -r --arg ref "$LOAN_REF" '.loans[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
+EMI_AMOUNT="$(jq -r --arg ref "$LOAN_REF" '.loans[] | select(.reference == $ref) | .emi' "$TMP_DIR/body.json")"
+request POST "$CUSTOMER_COOKIE" "/api/banking/loans/$LOAN_ID/repay" '{}'
+expect 200 "$HTTP_CODE" "Customer pays first simulated loan EMI"
+jq -e --argjson emi "$EMI_AMOUNT" '.ok == true and .installmentNumber == 1 and .paidAmount == $emi and .status == "approved" and .outstanding > 0' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/loans"
+expect 200 "$HTTP_CODE" "Loan outstanding and installment count update"
+jq -e --arg ref "$LOAN_REF" 'any(.loans[]; .reference == $ref and .paidInstallments == 1 and .outstanding > 0)' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Demo balance decreases by one EMI"
+BALANCE_AFTER_EMI="$(jq -r '.account.balance' "$TMP_DIR/body.json")"
+request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
+expect 200 "$HTTP_CODE" "Passbook records simulated EMI debit"
+jq -e --arg ref "$LOAN_REF" 'any(.transactions[]; .reference == $ref and .type == "demo_loan_emi" and .direction == "debit")' "$TMP_DIR/body.json" >/dev/null
+request POST "$BENEFICIARY_COOKIE" "/api/banking/loans/$LOAN_ID/repay" '{}'
+expect 404 "$HTTP_CODE" "Another customer cannot repay this customer's loan"
 request POST "$CASHIER_COOKIE" "/api/banking/cash-operations" "$(jq -nc --arg accountNumber "$CUSTOMER_ACCOUNT" '{accountNumber:$accountNumber,type:"cash_deposit",amount:100,note:"CI demo deposit"}')"
 expect 201 "$HTTP_CODE" "Cashier submits pending demo cash deposit"
 CASH_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
