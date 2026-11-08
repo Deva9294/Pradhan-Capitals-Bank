@@ -72,6 +72,22 @@ const fixedDeposits = () => db.collection("demo_fixed_deposits");
 const loanApplications = () => db.collection("demo_loan_applications");
 const paise = value => Math.round(Number(value) * 100);
 const inr = value => Number((Number(value || 0) / 100).toFixed(2));
+
+function calculateDemoEmi(principalPaise, tenureMonths, annualRate = 12) {
+  const monthlyRate = annualRate / 1200;
+  const factor = Math.pow(1 + monthlyRate, tenureMonths);
+  return Math.round(principalPaise * monthlyRate * factor / (factor - 1));
+}
+function addMonths(date, months) {
+  const result = new Date(date);
+  const day = result.getDate();
+  result.setDate(1);
+  result.setMonth(result.getMonth() + months);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
+
 async function ensureDemoAccount(user) {
   let account = await bankAccounts().findOne({ userId: user.id });
   if (account) return account;
@@ -846,7 +862,11 @@ app.get("/api/banking/loans", signed, async (req, res) => {
       id: String(item._id), reference: item.reference, customerName: item.customerName,
       amount: inr(item.amountPaise), tenureMonths: item.tenureMonths, purpose: item.purpose,
       status: item.status, branchName: item.branchName, createdAt: item.createdAt,
-      decisionAt: item.decisionAt || null, decisionNote: item.decisionNote || ""
+      decisionAt: item.decisionAt || null, decisionNote: item.decisionNote || "",
+      interestRate: item.interestRate || null, emi: item.emiPaise ? inr(item.emiPaise) : null,
+      totalPayable: item.totalPayablePaise ? inr(item.totalPayablePaise) : null,
+      outstanding: item.outstandingPaise !== undefined ? inr(item.outstandingPaise) : null,
+      paidInstallments: item.paidInstallments || 0, nextDueAt: item.nextDueAt || null
     })) });
   } catch (error) { res.status(500).json({ error: "Could not load demo loan applications." }); }
 });
@@ -872,6 +892,10 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
     if (!claimed.modifiedCount) return res.status(409).json({ error: "Application has already been processed." });
     let creditApplied = false;
     try {
+      const rate = 12;
+      const emiPaise = calculateDemoEmi(application.amountPaise, application.tenureMonths, rate);
+      const totalPayablePaise = emiPaise * application.tenureMonths;
+      const firstDueAt = addMonths(new Date(), 1);
       const credit = await bankAccounts().updateOne({ _id: application.accountId, status: "active" }, { $inc: { balancePaise: application.amountPaise }, $set: { updatedAt: new Date() } });
       if (!credit.modifiedCount) throw new Error("Customer demo account is unavailable.");
       creditApplied = true;
@@ -882,7 +906,11 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
         note: "Simulated loan disbursement; not a real credit facility",
         status: "completed", createdAt: new Date(), actorEmail: actor.email
       });
-      await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: { status: "approved", decisionAt: new Date() } });
+      await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: {
+        status: "approved", decisionAt: new Date(), interestRate: rate,
+        emiPaise, totalPayablePaise, outstandingPaise: totalPayablePaise,
+        paidInstallments: 0, nextDueAt: firstDueAt
+      } });
     } catch (error) {
       await bankTransactions().deleteOne({ transferId: application.reference });
       if (creditApplied) await bankAccounts().updateOne({ _id: application.accountId }, { $inc: { balancePaise: -application.amountPaise } });
@@ -892,6 +920,81 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
     await audit(actor, "DEMO_LOAN_APPROVED", application.reference);
     res.json({ ok: true, reference: application.reference, status: "approved", mode: "DEMO" });
   } catch (error) { res.status(500).json({ error: "Could not process demo loan decision." }); }
+});
+
+
+app.post("/api/banking/loans/:id/repay", permit("customer"), async (req, res) => {
+  let claimedLoan = null;
+  let debitedAccount = null;
+  let ledgerInserted = false;
+  let installmentReference = null;
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid demo loan id." });
+    const loanId = new ObjectId(req.params.id);
+    const loan = await loanApplications().findOne({
+      _id: loanId, userId: req.session.user.id, status: "approved"
+    });
+    if (!loan) return res.status(404).json({ error: "No repayable demo loan found." });
+    const paid = Number(loan.paidInstallments || 0);
+    if (paid >= loan.tenureMonths || !(loan.emiPaise > 0) || !(loan.outstandingPaise > 0)) {
+      return res.status(409).json({ error: "All demo loan installments are already paid." });
+    }
+    const emiPaise = Math.min(loan.emiPaise, loan.outstandingPaise);
+    const claim = await loanApplications().updateOne(
+      { _id: loanId, userId: req.session.user.id, status: "approved", paidInstallments: paid, outstandingPaise: loan.outstandingPaise },
+      { $set: { status: "repayment_processing", repaymentStartedAt: new Date() } }
+    );
+    if (!claim.modifiedCount) return res.status(409).json({ error: "A repayment is already processing. Refresh and try again." });
+    claimedLoan = loan;
+    const debit = await bankAccounts().updateOne(
+      { _id: loan.accountId, userId: req.session.user.id, status: "active", balancePaise: { $gte: emiPaise } },
+      { $inc: { balancePaise: -emiPaise }, $set: { updatedAt: new Date() } }
+    );
+    if (!debit.modifiedCount) {
+      await loanApplications().updateOne({ _id: loanId, status: "repayment_processing" }, { $set: { status: "approved" }, $unset: { repaymentStartedAt: "" } });
+      claimedLoan = null;
+      return res.status(400).json({ error: "Insufficient demo balance to pay this installment." });
+    }
+    debitedAccount = loan.accountId;
+    const installmentNumber = paid + 1;
+    installmentReference = loan.reference + "-EMI-" + String(installmentNumber).padStart(3, "0");
+    await bankTransactions().insertOne({
+      transferId: installmentReference, accountId: loan.accountId, userId: loan.userId,
+      direction: "debit", type: "demo_loan_emi", amountPaise: emiPaise,
+      counterparty: "DEMO LOAN REPAYMENT", reference: loan.reference,
+      note: "Simulated EMI installment " + installmentNumber + " of " + loan.tenureMonths,
+      status: "completed", createdAt: new Date(), actorEmail: req.session.user.email
+    });
+    ledgerInserted = true;
+    const nextPaid = installmentNumber;
+    const nextOutstanding = Math.max(0, loan.outstandingPaise - emiPaise);
+    const nextStatus = nextPaid >= loan.tenureMonths || nextOutstanding === 0 ? "paid" : "approved";
+    const nextDueAt = nextStatus === "paid" ? null : addMonths(loan.nextDueAt || new Date(), 1);
+    const updated = await loanApplications().updateOne(
+      { _id: loanId, status: "repayment_processing", paidInstallments: paid },
+      { $set: {
+        status: nextStatus, paidInstallments: nextPaid, outstandingPaise: nextOutstanding,
+        nextDueAt, lastPaidAt: new Date(), updatedAt: new Date()
+      }, $unset: { repaymentStartedAt: "" } }
+    );
+    if (!updated.modifiedCount) throw new Error("Could not complete installment update.");
+    await audit(req.session.user, "DEMO_LOAN_EMI_PAID", installmentReference + " / ₹" + inr(emiPaise));
+    return res.json({
+      ok: true, mode: "DEMO", reference: loan.reference, installmentReference,
+      installmentNumber: nextPaid, paidAmount: inr(emiPaise),
+      outstanding: inr(nextOutstanding), status: nextStatus, nextDueAt
+    });
+  } catch (error) {
+    if (claimedLoan) {
+      if (ledgerInserted && installmentReference) await bankTransactions().deleteOne({ transferId: installmentReference }).catch(() => {});
+      if (debitedAccount) await bankAccounts().updateOne({ _id: debitedAccount }, { $inc: { balancePaise: claimedLoan.emiPaise }, $set: { updatedAt: new Date() } }).catch(() => {});
+      await loanApplications().updateOne(
+        { _id: claimedLoan._id, status: "repayment_processing" },
+        { $set: { status: "approved" }, $unset: { repaymentStartedAt: "" } }
+      ).catch(() => {});
+    }
+    return res.status(500).json({ error: "Could not complete demo loan repayment. Refresh before retrying." });
+  }
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "API route not found." }));
