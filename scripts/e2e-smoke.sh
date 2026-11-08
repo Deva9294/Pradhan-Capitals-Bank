@@ -79,6 +79,11 @@ CUSTOMER_ACCOUNT="$(jq -r '.account.accountNumber' "$TMP_DIR/body.json")"
 request POST "" "/api/auth/register" '{"name":"CI Beneficiary","email":"beneficiary.ci@example.com","password":"ci-beneficiary-password-123"}'
 expect 201 "$HTTP_CODE" "Beneficiary demo registration"
 BENEFICIARY_ACCOUNT="$(jq -r '.demoAccount.accountNumber' "$TMP_DIR/body.json")"
+request POST "$CUSTOMER_COOKIE" "/api/banking/beneficiaries" "$(jq -nc --arg accountNumber "$BENEFICIARY_ACCOUNT" '{name:"CI Saved Beneficiary",accountNumber:$accountNumber}')"
+expect 201 "$HTTP_CODE" "Customer saves demo beneficiary"
+request GET "$CUSTOMER_COOKIE" "/api/banking/beneficiaries"
+expect 200 "$HTTP_CODE" "Customer reads saved beneficiaries"
+jq -e --arg account "$BENEFICIARY_ACCOUNT" 'any(.beneficiaries[]; .accountNumber == $account)' "$TMP_DIR/body.json" >/dev/null
 BENEFICIARY_COOKIE="$TMP_DIR/beneficiary.cookie"
 login customer beneficiary.ci@example.com ci-beneficiary-password-123 "$BENEFICIARY_COOKIE"
 request POST "$CUSTOMER_COOKIE" "/api/banking/transfer" "$(jq -nc --arg accountNumber "$BENEFICIARY_ACCOUNT" '{accountNumber:$accountNumber,amount:500,note:"CI transfer"}')"
@@ -96,6 +101,31 @@ jq -e --arg ref "$TRANSFER_REF" 'any(.transactions[]; .reference == $ref and .di
 request POST "$CUSTOMER_COOKIE" "/api/requests" '{"type":"account_information","branchName":"Bhopal Test","note":"Automated CI request"}'
 expect 201 "$HTTP_CODE" "Customer creates demo request"
 REQUEST_REF="$(jq -r '.request.reference' "$TMP_DIR/body.json")"
+request POST "$CUSTOMER_COOKIE" "/api/banking/fixed-deposits" '{"amount":1000,"tenureMonths":3}'
+expect 201 "$HTTP_CODE" "Customer opens demo fixed deposit"
+FD_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
+jq -e '.rate == 6.5 and .maturityAmount > 1000' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "FD principal is moved from available demo balance"
+jq -e '.account.balance == 23600' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/fixed-deposits"
+expect 200 "$HTTP_CODE" "Customer reads fixed deposit portfolio"
+jq -e --arg ref "$FD_REF" 'any(.fixedDeposits[]; .reference == $ref and .status == "active")' "$TMP_DIR/body.json" >/dev/null
+request POST "$CUSTOMER_COOKIE" "/api/banking/loans" '{"amount":10000,"tenureMonths":12,"purpose":"CI demo education loan"}'
+expect 201 "$HTTP_CODE" "Customer submits demo loan application"
+LOAN_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
+request GET "$MANAGER_COOKIE" "/api/banking/loans"
+expect 200 "$HTTP_CODE" "Manager reads branch loan review queue"
+LOAN_ID="$(jq -r --arg ref "$LOAN_REF" '.loans[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
+test -n "$LOAN_ID"
+request PATCH "$MANAGER_COOKIE" "/api/banking/loans/$LOAN_ID/decision" '{"decision":"approve","note":"CI demo approval"}'
+expect 200 "$HTTP_CODE" "Manager approves demo loan and simulates disbursement"
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Demo loan disbursement updates customer balance"
+jq -e '.account.balance == 33600' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
+expect 200 "$HTTP_CODE" "Passbook includes demo loan disbursement"
+jq -e --arg ref "$LOAN_REF" 'any(.transactions[]; .reference == $ref and .type == "demo_loan_disbursement")' "$TMP_DIR/body.json" >/dev/null
 request POST "$CASHIER_COOKIE" "/api/banking/cash-operations" "$(jq -nc --arg accountNumber "$CUSTOMER_ACCOUNT" '{accountNumber:$accountNumber,type:"cash_deposit",amount:100,note:"CI demo deposit"}')"
 expect 201 "$HTTP_CODE" "Cashier submits pending demo cash deposit"
 CASH_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
