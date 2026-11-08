@@ -67,6 +67,9 @@ const siteSettings = () => db.collection("site_settings");
 const bankAccounts = () => db.collection("bank_accounts");
 const bankTransactions = () => db.collection("bank_transactions");
 const cashOperations = () => db.collection("cash_operations");
+const beneficiaries = () => db.collection("demo_beneficiaries");
+const fixedDeposits = () => db.collection("demo_fixed_deposits");
+const loanApplications = () => db.collection("demo_loan_applications");
 const paise = value => Math.round(Number(value) * 100);
 const inr = value => Number((Number(value || 0) / 100).toFixed(2));
 async function ensureDemoAccount(user) {
@@ -196,7 +199,11 @@ async function initialise() {
     bankAccounts().createIndex({ accountNumber: 1 }, { unique: true }),
     bankTransactions().createIndex({ accountId: 1, createdAt: -1 }),
     bankTransactions().createIndex({ transferId: 1 }),
-    cashOperations().createIndex({ status: 1, branchName: 1, createdAt: -1 })
+    cashOperations().createIndex({ status: 1, branchName: 1, createdAt: -1 }),
+    beneficiaries().createIndex({ userId: 1, accountNumber: 1 }, { unique: true }),
+    fixedDeposits().createIndex({ userId: 1, status: 1, maturityAt: 1 }),
+    loanApplications().createIndex({ userId: 1, createdAt: -1 }),
+    loanApplications().createIndex({ status: 1, branchName: 1, createdAt: -1 })
 
   ]);
   await bootstrapAccount(
@@ -685,6 +692,204 @@ app.patch("/api/banking/cash-operations/:id/approve", permit("headquarters", "br
     await audit(actor, "DEMO_CASH_OPERATION_APPROVED", reference);
     res.json({ ok: true, reference, status: "approved", mode: "DEMO" });
   } catch (error) { res.status(500).json({ error: "Could not approve demo cash operation." }); }
+});
+
+
+
+// Customer conveniences: saved beneficiaries, fixed deposits and demo loan workflow.
+app.get("/api/banking/beneficiaries", permit("customer"), async (req, res) => {
+  try {
+    const items = await beneficiaries().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(50).toArray();
+    res.json({ beneficiaries: items.map(item => ({ id: String(item._id), name: item.name, accountNumber: item.accountNumber, createdAt: item.createdAt })) });
+  } catch (error) { res.status(500).json({ error: "Could not load saved beneficiaries." }); }
+});
+
+app.post("/api/banking/beneficiaries", permit("customer"), async (req, res) => {
+  try {
+    const name = cleanText(req.body?.name, 60);
+    const accountNumber = cleanText(req.body?.accountNumber, 30).toUpperCase();
+    const own = await ensureDemoAccount(req.session.user);
+    if (name.length < 2 || !/^PCBD\d{12}$/.test(accountNumber) || accountNumber === own.accountNumber) {
+      return res.status(400).json({ error: "Enter a beneficiary name and a different valid demo account number." });
+    }
+    const target = await bankAccounts().findOne({ accountNumber, status: "active" }, { projection: { _id: 1 } });
+    if (!target) return res.status(404).json({ error: "Demo beneficiary account not found." });
+    const result = await beneficiaries().insertOne({ userId: req.session.user.id, name, accountNumber, createdAt: new Date() });
+    await audit(req.session.user, "DEMO_BENEFICIARY_ADDED", accountNumber);
+    res.status(201).json({ ok: true, beneficiary: { id: String(result.insertedId), name, accountNumber } });
+  } catch (error) {
+    res.status(error.code === 11000 ? 409 : 500).json({ error: error.code === 11000 ? "This beneficiary is already saved." : "Could not save beneficiary." });
+  }
+});
+
+app.delete("/api/banking/beneficiaries/:id", permit("customer"), async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid beneficiary id." });
+    const result = await beneficiaries().deleteOne({ _id: new ObjectId(req.params.id), userId: req.session.user.id });
+    if (!result.deletedCount) return res.status(404).json({ error: "Beneficiary not found." });
+    await audit(req.session.user, "DEMO_BENEFICIARY_REMOVED", req.params.id);
+    res.json({ ok: true });
+  } catch (error) { res.status(500).json({ error: "Could not remove beneficiary." }); }
+});
+
+async function matureDueFixedDeposits(userId) {
+  const due = await fixedDeposits().find({ userId, status: "active", maturityAt: { $lte: new Date() } }).limit(50).toArray();
+  for (const fd of due) {
+    const claim = await fixedDeposits().updateOne({ _id: fd._id, status: "active" }, { $set: { status: "matured", maturedAt: new Date() } });
+    if (!claim.modifiedCount) continue;
+    const account = await bankAccounts().findOne({ userId, status: "active" });
+    if (!account) {
+      await fixedDeposits().updateOne({ _id: fd._id, status: "matured" }, { $set: { status: "maturity_pending" } });
+      continue;
+    }
+    await bankAccounts().updateOne({ _id: account._id }, { $inc: { balancePaise: fd.maturityAmountPaise }, $set: { updatedAt: new Date() } });
+    await bankTransactions().insertOne({
+      transferId: fd.reference, accountId: account._id, userId,
+      direction: "credit", type: "fd_maturity", amountPaise: fd.maturityAmountPaise,
+      counterparty: "DEMO FIXED DEPOSIT", reference: fd.reference,
+      note: "Principal and simulated interest credited at maturity",
+      status: "completed", createdAt: new Date()
+    });
+  }
+}
+
+app.get("/api/banking/fixed-deposits", permit("customer"), async (req, res) => {
+  try {
+    await matureDueFixedDeposits(req.session.user.id);
+    const items = await fixedDeposits().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(100).toArray();
+    res.json({ fixedDeposits: items.map(item => ({
+      id: String(item._id), reference: item.reference, principal: inr(item.principalPaise),
+      rate: item.rate, tenureMonths: item.tenureMonths, maturityAmount: inr(item.maturityAmountPaise),
+      maturityAt: item.maturityAt, status: item.status, createdAt: item.createdAt
+    })) });
+  } catch (error) { res.status(500).json({ error: "Could not load demo fixed deposits." }); }
+});
+
+app.post("/api/banking/fixed-deposits", permit("customer"), async (req, res) => {
+  try {
+    const principalPaise = paise(req.body?.amount);
+    const tenureMonths = Number(req.body?.tenureMonths);
+    if (!Number.isSafeInteger(principalPaise) || principalPaise < 10000 || principalPaise > 100000000 ||
+        !Number.isInteger(tenureMonths) || tenureMonths < 3 || tenureMonths > 36) {
+      return res.status(400).json({ error: "Demo FD amount must be ₹100–₹10,00,000 and tenure 3–36 months." });
+    }
+    const account = await ensureDemoAccount(req.session.user);
+    const rate = 6.5;
+    const maturityAmountPaise = Math.round(principalPaise * Math.pow(1 + rate / 400, tenureMonths / 3));
+    const debit = await bankAccounts().updateOne(
+      { _id: account._id, status: "active", balancePaise: { $gte: principalPaise } },
+      { $inc: { balancePaise: -principalPaise }, $set: { updatedAt: new Date() } }
+    );
+    if (!debit.modifiedCount) return res.status(400).json({ error: "Insufficient demo balance." });
+    const now = new Date();
+    const maturityAt = new Date(now);
+    maturityAt.setMonth(maturityAt.getMonth() + tenureMonths);
+    const reference = "PCFD" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+    try {
+      await fixedDeposits().insertOne({
+        userId: req.session.user.id, accountId: account._id, reference,
+        principalPaise, rate, tenureMonths, maturityAmountPaise, maturityAt,
+        status: "active", createdAt: now
+      });
+      await bankTransactions().insertOne({
+        transferId: reference, accountId: account._id, userId: req.session.user.id,
+        direction: "debit", type: "fixed_deposit_opened", amountPaise: principalPaise,
+        counterparty: "DEMO FIXED DEPOSIT", reference, note: "Principal placed in simulated fixed deposit",
+        status: "completed", createdAt: now
+      });
+    } catch (error) {
+      await fixedDeposits().deleteOne({ reference });
+      await bankTransactions().deleteOne({ transferId: reference });
+      await bankAccounts().updateOne({ _id: account._id }, { $inc: { balancePaise: principalPaise } });
+      throw error;
+    }
+    await audit(req.session.user, "DEMO_FD_OPENED", reference + " / ₹" + inr(principalPaise));
+    res.status(201).json({ ok: true, reference, principal: inr(principalPaise), rate, maturityAmount: inr(maturityAmountPaise), maturityAt, mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not open demo fixed deposit." }); }
+});
+
+app.post("/api/banking/loans", permit("customer"), async (req, res) => {
+  try {
+    const amountPaise = paise(req.body?.amount);
+    const tenureMonths = Number(req.body?.tenureMonths);
+    const purpose = cleanText(req.body?.purpose, 120);
+    if (!Number.isSafeInteger(amountPaise) || amountPaise < 100000 || amountPaise > 50000000 ||
+        !Number.isInteger(tenureMonths) || tenureMonths < 3 || tenureMonths > 60 || purpose.length < 3) {
+      return res.status(400).json({ error: "Demo loan must be ₹1,000–₹5,00,000, tenure 3–60 months and purpose at least 3 characters." });
+    }
+    const account = await ensureDemoAccount(req.session.user);
+    const existing = await loanApplications().findOne({ userId: req.session.user.id, status: { $in: ["pending", "processing", "approved"] } });
+    if (existing) return res.status(409).json({ error: "You already have a pending or approved demo loan application." });
+    const reference = "PCLA" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+    const document = {
+      userId: req.session.user.id, customerName: req.session.user.name,
+      accountId: account._id, accountNumber: account.accountNumber,
+      branchName: account.branchName, reference, amountPaise, tenureMonths,
+      purpose, status: "pending", createdAt: new Date(), updatedAt: new Date()
+    };
+    await loanApplications().insertOne(document);
+    await audit(req.session.user, "DEMO_LOAN_APPLIED", reference + " / ₹" + inr(amountPaise));
+    res.status(201).json({ ok: true, reference, status: "pending", mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not submit demo loan application." }); }
+});
+
+app.get("/api/banking/loans", signed, async (req, res) => {
+  try {
+    const actor = req.session.user;
+    let filter;
+    if (actor.role === "customer") filter = { userId: actor.id };
+    else if (actor.role === "headquarters") filter = {};
+    else if (["branch", "manager"].includes(actor.role)) filter = { branchName: actor.branchName || "" };
+    else return res.status(403).json({ error: "Not permitted." });
+    const items = await loanApplications().find(filter).sort({ createdAt: -1 }).limit(100).toArray();
+    res.json({ loans: items.map(item => ({
+      id: String(item._id), reference: item.reference, customerName: item.customerName,
+      amount: inr(item.amountPaise), tenureMonths: item.tenureMonths, purpose: item.purpose,
+      status: item.status, branchName: item.branchName, createdAt: item.createdAt,
+      decisionAt: item.decisionAt || null, decisionNote: item.decisionNote || ""
+    })) });
+  } catch (error) { res.status(500).json({ error: "Could not load demo loan applications." }); }
+});
+
+app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "manager"), async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid loan application id." });
+    const decision = req.body?.decision;
+    const decisionNote = cleanText(req.body?.note, 160);
+    if (!["approve", "reject"].includes(decision)) return res.status(400).json({ error: "Choose approve or reject." });
+    const actor = req.session.user;
+    const filter = { _id: new ObjectId(req.params.id), status: "pending" };
+    if (actor.role !== "headquarters") filter.branchName = actor.branchName || "";
+    const application = await loanApplications().findOne(filter);
+    if (!application) return res.status(404).json({ error: "Pending demo loan not found in your branch." });
+    if (decision === "reject") {
+      const changed = await loanApplications().updateOne(filter, { $set: { status: "rejected", decisionAt: new Date(), decisionBy: actor.email, decisionNote } });
+      if (!changed.modifiedCount) return res.status(409).json({ error: "Application has already been processed." });
+      await audit(actor, "DEMO_LOAN_REJECTED", application.reference);
+      return res.json({ ok: true, reference: application.reference, status: "rejected" });
+    }
+    const claimed = await loanApplications().updateOne(filter, { $set: { status: "processing", decisionBy: actor.email, decisionNote } });
+    if (!claimed.modifiedCount) return res.status(409).json({ error: "Application has already been processed." });
+    try {
+      const credit = await bankAccounts().updateOne({ _id: application.accountId, status: "active" }, { $inc: { balancePaise: application.amountPaise }, $set: { updatedAt: new Date() } });
+      if (!credit.modifiedCount) throw new Error("Customer demo account is unavailable.");
+      await bankTransactions().insertOne({
+        transferId: application.reference, accountId: application.accountId, userId: application.userId,
+        direction: "credit", type: "demo_loan_disbursement", amountPaise: application.amountPaise,
+        counterparty: "DEMO LOAN DESK", reference: application.reference,
+        note: "Simulated loan disbursement; not a real credit facility",
+        status: "completed", createdAt: new Date(), actorEmail: actor.email
+      });
+      await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: { status: "approved", decisionAt: new Date() } });
+    } catch (error) {
+      await bankTransactions().deleteOne({ transferId: application.reference });
+      await bankAccounts().updateOne({ _id: application.accountId }, { $inc: { balancePaise: -application.amountPaise } });
+      await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: { status: "pending", decisionBy: null } });
+      throw error;
+    }
+    await audit(actor, "DEMO_LOAN_APPROVED", application.reference);
+    res.json({ ok: true, reference: application.reference, status: "approved", mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not process demo loan decision." }); }
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "API route not found." }));
