@@ -770,7 +770,7 @@ app.post("/api/banking/fixed-deposits", permit("customer"), async (req, res) => 
     const principalPaise = paise(req.body?.amount);
     const tenureMonths = Number(req.body?.tenureMonths);
     if (!Number.isSafeInteger(principalPaise) || principalPaise < 10000 || principalPaise > 100000000 ||
-        !Number.isInteger(tenureMonths) || tenureMonths < 3 || tenureMonths > 36) {
+        !Number.isInteger(tenureMonths) || tenureMonths < 3 || tenureMonths > 36 || tenureMonths % 3 !== 0) {
       return res.status(400).json({ error: "Demo FD amount must be ₹100–₹10,00,000 and tenure 3–36 months." });
     }
     const account = await ensureDemoAccount(req.session.user);
@@ -870,9 +870,11 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
     }
     const claimed = await loanApplications().updateOne(filter, { $set: { status: "processing", decisionBy: actor.email, decisionNote } });
     if (!claimed.modifiedCount) return res.status(409).json({ error: "Application has already been processed." });
+    let creditApplied = false;
     try {
       const credit = await bankAccounts().updateOne({ _id: application.accountId, status: "active" }, { $inc: { balancePaise: application.amountPaise }, $set: { updatedAt: new Date() } });
       if (!credit.modifiedCount) throw new Error("Customer demo account is unavailable.");
+      creditApplied = true;
       await bankTransactions().insertOne({
         transferId: application.reference, accountId: application.accountId, userId: application.userId,
         direction: "credit", type: "demo_loan_disbursement", amountPaise: application.amountPaise,
@@ -883,7 +885,7 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
       await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: { status: "approved", decisionAt: new Date() } });
     } catch (error) {
       await bankTransactions().deleteOne({ transferId: application.reference });
-      await bankAccounts().updateOne({ _id: application.accountId }, { $inc: { balancePaise: -application.amountPaise } });
+      if (creditApplied) await bankAccounts().updateOne({ _id: application.accountId }, { $inc: { balancePaise: -application.amountPaise } });
       await loanApplications().updateOne({ _id: application._id, status: "processing" }, { $set: { status: "pending", decisionBy: null } });
       throw error;
     }
