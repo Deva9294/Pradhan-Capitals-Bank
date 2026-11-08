@@ -349,6 +349,8 @@ app.get("/api/portal/summary", signed, async (req, res) => {
         { label: "Managers", value: counts.manager || 0 },
         { label: "Staff accounts", value: counts.staff || 0 },
         { label: "Cashier accounts", value: counts.cashier || 0 },
+        { label: "Demo bank accounts", value: await bankAccounts().countDocuments({}) },
+        { label: "Pending cash approvals", value: await cashOperations().countDocuments({ status: "pending" }) },
         { label: "Demo requests", value: await requests().countDocuments({}) }
       ];
     } else if (role === "admin") {
@@ -359,11 +361,12 @@ app.get("/api/portal/summary", signed, async (req, res) => {
         { label: "Mode", value: "Prototype" }
       ];
     } else if (role === "customer") {
+      const demoAccount = await ensureDemoAccount(user);
       cards = [
-        { label: "Profile", value: "Active" },
+        { label: "Available demo balance", value: "₹" + inr(demoAccount.balancePaise).toLocaleString("en-IN") },
+        { label: "Demo account", value: demoAccount.accountNumber },
         { label: "My demo requests", value: await requests().countDocuments({ userId: user.id }) },
-        { label: "Service mode", value: "Simulation" },
-        { label: "Portal", value: "Customer" }
+        { label: "Account status", value: "Active • Demo" }
       ];
     } else {
       const branchFilter = { branchName: user.branchName || "" };
