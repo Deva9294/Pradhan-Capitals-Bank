@@ -70,7 +70,11 @@ request GET "$CASHIER_COOKIE" "/api/requests"
 expect 403 "$HTTP_CODE" "Cashier cannot access customer request records"
 request POST "" "/api/auth/register" '{"name":"CI Customer","email":"customer.ci@example.com","password":"ci-customer-password-123"}'
 expect 201 "$HTTP_CODE" "Customer registration"
+jq -e '.demoAccount.accountNumber | startswith("PCBD")' "$TMP_DIR/body.json" >/dev/null
 login customer customer.ci@example.com ci-customer-password-123 "$CUSTOMER_COOKIE"
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Customer reads simulated banking account"
+jq -e '.account.mode == "DEMO" and .account.balance == 25000' "$TMP_DIR/body.json" >/dev/null
 request POST "$CUSTOMER_COOKIE" "/api/requests" '{"type":"account_information","branchName":"Bhopal Test","note":"Automated CI request"}'
 expect 201 "$HTTP_CODE" "Customer creates demo request"
 REQUEST_REF="$(jq -r '.request.reference' "$TMP_DIR/body.json")"
