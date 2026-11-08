@@ -96,6 +96,20 @@ jq -e --arg ref "$TRANSFER_REF" 'any(.transactions[]; .reference == $ref and .di
 request POST "$CUSTOMER_COOKIE" "/api/requests" '{"type":"account_information","branchName":"Bhopal Test","note":"Automated CI request"}'
 expect 201 "$HTTP_CODE" "Customer creates demo request"
 REQUEST_REF="$(jq -r '.request.reference' "$TMP_DIR/body.json")"
+request POST "$CASHIER_COOKIE" "/api/banking/cash-operations" "$(jq -nc --arg accountNumber "$CUSTOMER_ACCOUNT" '{accountNumber:$accountNumber,type:"cash_deposit",amount:100,note:"CI demo deposit"}')"
+expect 201 "$HTTP_CODE" "Cashier submits pending demo cash deposit"
+CASH_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
+request GET "$CASHIER_COOKIE" "/api/banking/cash-operations"
+expect 200 "$HTTP_CODE" "Cashier views cash queue"
+CASH_ID="$(jq -r --arg ref "$CASH_REF" '.operations[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
+test -n "$CASH_ID"
+request PATCH "$CASHIER_COOKIE" "/api/banking/cash-operations/$CASH_ID/approve" '{}'
+expect 403 "$HTTP_CODE" "Cashier cannot approve own cash entry"
+request PATCH "$MANAGER_COOKIE" "/api/banking/cash-operations/$CASH_ID/approve" '{}'
+expect 200 "$HTTP_CODE" "Manager approves branch cash deposit"
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Approved cash deposit updates demo balance"
+jq -e '.account.balance == 24600' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/requests"
 expect 200 "$HTTP_CODE" "Customer reads own requests"
 REQUEST_ID="$(jq -r --arg ref "$REQUEST_REF" '.requests[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
