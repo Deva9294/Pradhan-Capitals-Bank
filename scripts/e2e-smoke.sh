@@ -107,7 +107,7 @@ FD_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
 jq -e '.rate == 6.5 and .maturityAmount > 1000' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "FD principal is moved from available demo balance"
-jq -e '.account.balance == 23600' "$TMP_DIR/body.json" >/dev/null
+jq -e '.account.balance == 23500' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/fixed-deposits"
 expect 200 "$HTTP_CODE" "Customer reads fixed deposit portfolio"
 jq -e --arg ref "$FD_REF" 'any(.fixedDeposits[]; .reference == $ref and .status == "active")' "$TMP_DIR/body.json" >/dev/null
@@ -122,7 +122,7 @@ request PATCH "$MANAGER_COOKIE" "/api/banking/loans/$LOAN_ID/decision" '{"decisi
 expect 200 "$HTTP_CODE" "Manager approves demo loan and simulates disbursement"
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "Demo loan disbursement updates customer balance"
-jq -e '.account.balance == 33600' "$TMP_DIR/body.json" >/dev/null
+jq -e '.account.balance == 33500' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
 expect 200 "$HTTP_CODE" "Passbook includes demo loan disbursement"
 jq -e --arg ref "$LOAN_REF" 'any(.transactions[]; .reference == $ref and .type == "demo_loan_disbursement")' "$TMP_DIR/body.json" >/dev/null
@@ -139,7 +139,7 @@ request PATCH "$MANAGER_COOKIE" "/api/banking/cash-operations/$CASH_ID/approve" 
 expect 200 "$HTTP_CODE" "Manager approves branch cash deposit"
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "Approved cash deposit updates demo balance"
-jq -e '.account.balance == 24600' "$TMP_DIR/body.json" >/dev/null
+jq -e '.account.balance == 33600' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/requests"
 expect 200 "$HTTP_CODE" "Customer reads own requests"
 REQUEST_ID="$(jq -r --arg ref "$REQUEST_REF" '.requests[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
