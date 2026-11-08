@@ -357,7 +357,7 @@ app.get("/api/portal/summary", signed, async (req, res) => {
       cards = [
         { label: "Website role", value: "Administrator" },
         { label: "Public settings", value: "Editable" },
-        { label: "Financial operations", value: "Disabled" },
+        { label: "Financial operations", value: "Demo ledger only" },
         { label: "Mode", value: "Prototype" }
       ];
     } else if (role === "customer") {
@@ -401,8 +401,8 @@ app.get("/api/portal/summary", signed, async (req, res) => {
       branch: [{ title: "Branch operations", description: "Review your branch team and assigned demo requests." }],
       staff: [{ title: "Staff workspace", description: "Review and update demo service requests assigned to your branch." }],
       manager: [{ title: "Team oversight", description: "Create staff accounts and manage branch demo requests." }],
-      cashier: [{ title: "Cashier workspace", description: "Training workspace only. No real cash, deposits or withdrawals are processed." }],
-      customer: [{ title: "My profile", description: "Review your demo profile and submit a non-sensitive service request." }]
+      cashier: [{ title: "Branch cash desk", description: "Submit simulated deposit/withdrawal entries; manager, branch or HQ approval is required." }],
+      customer: [{ title: "Customer banking", description: "View your demo account, transfer simulated funds internally and download your passbook statement." }]
     };
     res.json({
       title: titles[role],
