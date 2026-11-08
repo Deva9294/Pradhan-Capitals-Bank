@@ -67,6 +67,8 @@
     <div class="field full"><label for="loanPurpose">Purpose (sample only)</label><input id="loanPurpose" maxlength="120" required placeholder="e.g. Demo education loan"></div>
     <div class="full"><button class="btn">Submit demo application</button><span id="loanMessage" class="muted" role="status" style="margin-left:12px"></span></div>
   </form>
+  <div class="row" style="margin-top:20px"><h3>My Demo Loan Applications</h3><button class="btn outline" id="refreshMyLoans" type="button">Refresh</button></div>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Amount</th><th>Tenure</th><th>Purpose</th><th>Status</th><th>Submitted</th></tr></thead><tbody id="myLoanRows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
 </section>
 <section class="card hidden" id="loanOperationsCard" style="margin-top:20px">
   <div class="row"><div><h2>Demo Loan Review Desk</h2><p class="muted">Approving credits simulated funds only; no real loan is issued.</p></div><button class="btn outline" id="refreshLoans" type="button">Refresh</button></div>
