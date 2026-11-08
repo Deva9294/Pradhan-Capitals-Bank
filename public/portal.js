@@ -177,7 +177,7 @@ async function loadLoans() {
       "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + money(item.amount) +
       "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
       escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
-      (item.emi ? " · EMI " + money(item.emi) + " · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) + " · Due " + escapeHtml(item.outstanding === null ? "—" : money(item.outstanding)) : "") +
+      (item.emi ? " · EMI " + money(item.emi) + " · Rate " + escapeHtml(item.interestRate) + "% · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) + " · Outstanding " + money(item.outstanding) + " · Next " + escapeHtml(item.nextDueAt ? formatDate(item.nextDueAt) : "—") : "") +
       "</td><td>" + escapeHtml(formatDate(item.createdAt)) +
       (item.status === "approved" ? '</td><td>' + money(item.emi) + ' <button class="btn loan-repay" type="button" data-id="' + escapeHtml(item.id) + '">Pay EMI</button>' : "</td><td>—") + "</td></tr>"
     ).join("") || '<tr><td colspan="6">No demo applications yet.</td></tr>';
@@ -192,7 +192,7 @@ async function loadLoans() {
         escapeHtml(item.customerName || "Demo customer") + "</td><td>" + money(item.amount) +
         "</td><td>" + escapeHtml(item.tenureMonths) + " months</td><td>" +
         escapeHtml(item.purpose) + "</td><td>" + escapeHtml(item.status) +
-        (item.emi ? " · EMI " + money(item.emi) + " · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) : "") +
+        (item.emi ? " · EMI " + money(item.emi) + " · Rate " + escapeHtml(item.interestRate) + "% · Paid " + escapeHtml(item.paidInstallments || 0) + "/" + escapeHtml(item.tenureMonths) + " · Outstanding " + money(item.outstanding) : "") +
         "</td><td>" + action + "</td></tr>";
     }).join("") || '<tr><td colspan="7">No demo loan applications.</td></tr>';
   }
