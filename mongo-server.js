@@ -501,6 +501,7 @@ app.post("/api/requests", permit("customer"), async (req, res) => {
       status: "submitted", createdAt: new Date(), updatedAt: new Date()
     };
     await requests().insertOne(document);
+    if (branch) await bankAccounts().updateOne({ userId: req.session.user.id, branchName: "Demo Digital Branch" }, { $set: { branchName: branch } });
     await audit(req.session.user, "DEMO_REQUEST_CREATED", reference + " / " + type);
     res.status(201).json({ ok: true, request: { reference, type, status: document.status, createdAt: document.createdAt } });
   } catch (error) {
