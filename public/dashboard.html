@@ -60,7 +60,7 @@
   <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Principal</th><th>Rate</th><th>Tenure</th><th>Maturity Value</th><th>Maturity Date</th><th>Status</th></tr></thead><tbody id="fdRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 </section>
 <section class="card hidden" id="customerLoanCard" style="margin-top:20px">
-  <h2>Demo Loan Application</h2><p class="muted">Sample application workflow only. Approval is not a real credit decision; repayment is not collected.</p>
+  <h2>Demo Loan Application</h2><p class="muted">Sample workflow only. Illustrative 12% p.a. EMI schedule and repayments affect demo balance only; no real credit is issued or collected.</p>
   <form id="loanForm" class="formgrid">
     <div class="field"><label for="loanAmount">Requested amount (₹1,000–₹5,00,000)</label><input id="loanAmount" type="number" min="1000" max="500000" step="0.01" required></div>
     <div class="field"><label for="loanTenure">Tenure</label><select id="loanTenure"><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="48">48 months</option><option value="60">60 months</option></select></div>
@@ -68,7 +68,7 @@
     <div class="full"><button class="btn">Submit demo application</button><span id="loanMessage" class="muted" role="status" style="margin-left:12px"></span></div>
   </form>
   <div class="row" style="margin-top:20px"><h3>My Demo Loan Applications</h3><button class="btn outline" id="refreshMyLoans" type="button">Refresh</button></div>
-  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Amount</th><th>Tenure</th><th>Purpose</th><th>Status</th><th>Submitted</th></tr></thead><tbody id="myLoanRows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Amount</th><th>Tenure</th><th>Purpose</th><th>Status / Progress</th><th>Submitted</th><th>EMI Action</th></tr></thead><tbody id="myLoanRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 </section>
 <section class="card hidden" id="loanOperationsCard" style="margin-top:20px">
   <div class="row"><div><h2>Demo Loan Review Desk</h2><p class="muted">Approving credits simulated funds only; no real loan is issued.</p></div><button class="btn outline" id="refreshLoans" type="button">Refresh</button></div>
