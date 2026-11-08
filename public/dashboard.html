@@ -40,6 +40,39 @@
   <div class="row" style="margin-top:20px"><h3>Cash operations queue</h3><button class="btn outline" id="refreshCashOperations" type="button">Refresh</button></div>
   <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Date</th><th>Reference</th><th>Account</th><th>Type</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody id="cashOperationRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 </section>
+
+<section class="card hidden" id="customerProductsCard" style="margin-top:20px">
+  <div class="row"><div><h2>Savings & Investment Simulator</h2><p class="muted">Illustrative rates and maturity values only. Not a deposit product or financial offer.</p></div><span class="security">● DEMO ONLY</span></div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:14px">
+    <div class="card"><h3>Open Demo Fixed Deposit</h3><form id="fdForm">
+      <div class="field"><label for="fdAmount">Principal (₹100–₹10,00,000)</label><input id="fdAmount" type="number" min="100" max="1000000" step="0.01" required></div>
+      <div class="field" style="margin-top:10px"><label for="fdTenure">Tenure</label><select id="fdTenure"><option value="3">3 months</option><option value="6">6 months</option><option value="9">9 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option><option value="36">36 months</option></select></div>
+      <p class="muted">Illustrative fixed rate: 6.5% p.a., compounded quarterly.</p><button class="btn">Open demo FD</button><p id="fdMessage" class="muted" role="status"></p>
+    </form></div>
+    <div class="card"><h3>Save a Beneficiary</h3><form id="beneficiaryForm">
+      <div class="field"><label for="beneficiaryName">Beneficiary name</label><input id="beneficiaryName" maxlength="60" required></div>
+      <div class="field" style="margin-top:10px"><label for="beneficiaryAccount">Demo account number</label><input id="beneficiaryAccount" maxlength="20" placeholder="PCBD..." required></div>
+      <button class="btn" style="margin-top:14px">Save beneficiary</button><p id="beneficiaryMessage" class="muted" role="status"></p>
+    </form>
+    <div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Name</th><th>Demo account</th><th>Action</th></tr></thead><tbody id="beneficiaryRows"><tr><td colspan="3">Loading…</td></tr></tbody></table></div></div>
+  </div>
+  <div class="row" style="margin-top:20px"><h3>My Fixed Deposits</h3><button class="btn outline" id="refreshFDs" type="button">Refresh</button></div>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Principal</th><th>Rate</th><th>Tenure</th><th>Maturity Value</th><th>Maturity Date</th><th>Status</th></tr></thead><tbody id="fdRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+</section>
+<section class="card hidden" id="customerLoanCard" style="margin-top:20px">
+  <h2>Demo Loan Application</h2><p class="muted">Sample application workflow only. Approval is not a real credit decision; repayment is not collected.</p>
+  <form id="loanForm" class="formgrid">
+    <div class="field"><label for="loanAmount">Requested amount (₹1,000–₹5,00,000)</label><input id="loanAmount" type="number" min="1000" max="500000" step="0.01" required></div>
+    <div class="field"><label for="loanTenure">Tenure</label><select id="loanTenure"><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="24">24 months</option><option value="36">36 months</option><option value="48">48 months</option><option value="60">60 months</option></select></div>
+    <div class="field full"><label for="loanPurpose">Purpose (sample only)</label><input id="loanPurpose" maxlength="120" required placeholder="e.g. Demo education loan"></div>
+    <div class="full"><button class="btn">Submit demo application</button><span id="loanMessage" class="muted" role="status" style="margin-left:12px"></span></div>
+  </form>
+</section>
+<section class="card hidden" id="loanOperationsCard" style="margin-top:20px">
+  <div class="row"><div><h2>Demo Loan Review Desk</h2><p class="muted">Approving credits simulated funds only; no real loan is issued.</p></div><button class="btn outline" id="refreshLoans" type="button">Refresh</button></div>
+  <div class="tablewrap" style="margin-top:14px"><table><thead><tr><th>Reference</th><th>Customer</th><th>Amount</th><th>Tenure</th><th>Purpose</th><th>Status</th><th>Decision</th></tr></thead><tbody id="loanRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+  <p id="loanOperationsMessage" class="muted" role="status"></p>
+</section>
 <section class="card hidden" id="siteSettingsCard" style="margin-top:20px"><h2>Website content management</h2><p class="muted">Changes are saved to MongoDB and shown on the public homepage. Do not publish misleading banking claims or real customer information.</p><form id="siteSettingsForm" class="formgrid"><div class="field"><label for="siteName">Website name</label><input id="siteName" maxlength="80" required></div><div class="field"><label for="tagline">Tagline</label><input id="tagline" maxlength="120"></div><div class="field full"><label for="announcement">Announcement banner</label><input id="announcement" maxlength="240"></div><div class="field full"><label for="heroTitle">Homepage headline</label><input id="heroTitle" maxlength="140"></div><div class="field full"><label for="heroDescription">Homepage description</label><input id="heroDescription" maxlength="400"></div><div class="field"><label for="supportEmail">Support email</label><input id="supportEmail" type="email" maxlength="160"></div><div class="field"><label for="supportPhone">Support phone</label><input id="supportPhone" maxlength="30"></div><div class="field full"><label for="footerText">Footer notice</label><input id="footerText" maxlength="240"></div><div class="full"><button class="btn">Save website settings</button><span id="siteSettingsMessage" class="muted" role="status" style="margin-left:12px"></span></div></form></section>
 
 <section class="card hidden" id="customerRequestCard" style="margin-top:20px"><h2>Submit a demo service request</h2><p class="muted">Use fictional/sample information only. Do not include account numbers, passwords, OTPs, Aadhaar, PAN or other personal data.</p><form id="customerRequestForm" class="formgrid"><div class="field"><label for="requestType">Request category</label><select id="requestType" required><option value="account_information">Account information</option><option value="loan_information">Loan information</option><option value="deposit_information">Deposit information</option><option value="general_support">General support</option></select></div><div class="field"><label for="requestBranch">Branch (optional)</label><input id="requestBranch" maxlength="100" placeholder="e.g. Bhopal Main"></div><div class="field full"><label for="requestNote">Short note (optional)</label><input id="requestNote" maxlength="300" placeholder="Do not enter sensitive information"></div><div class="full"><button class="btn">Submit demo request</button><span id="customerRequestMessage" class="muted" role="status" style="margin-left:12px"></span></div></form></section>
