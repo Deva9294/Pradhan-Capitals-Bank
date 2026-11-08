@@ -64,6 +64,54 @@ const users = () => db.collection("users");
 const logs = () => db.collection("audit_logs");
 const requests = () => db.collection("demo_requests");
 const siteSettings = () => db.collection("site_settings");
+const bankAccounts = () => db.collection("bank_accounts");
+const bankTransactions = () => db.collection("bank_transactions");
+const cashOperations = () => db.collection("cash_operations");
+const paise = value => Math.round(Number(value) * 100);
+const inr = value => Number((Number(value || 0) / 100).toFixed(2));
+async function ensureDemoAccount(user) {
+  let account = await bankAccounts().findOne({ userId: user.id });
+  if (account) return account;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const accountNumber = "PCBD" + String(Date.now()).slice(-8) + String(Math.floor(1000 + Math.random() * 9000));
+    try {
+      await bankAccounts().insertOne({
+        userId: user.id, accountNumber, accountType: "SAVINGS_DEMO",
+        balancePaise: 2500000, // ₹25,000 demo opening balance
+        currency: "INR", branchName: user.branchName || "Demo Digital Branch",
+        ifscDemo: "PCBD0000001", status: "active", createdAt: new Date()
+      });
+      account = await bankAccounts().findOne({ userId: user.id });
+      await audit(user, "DEMO_ACCOUNT_OPENED", "Demo savings account " + accountNumber);
+      return account;
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      account = await bankAccounts().findOne({ userId: user.id });
+      if (account) return account;
+    }
+  }
+  throw new Error("Could not allocate a demo account number.");
+}
+async function addLedgerPair({ from, to, amountPaise, actor, type, reference, note }) {
+  const transferId = randomUUID();
+  const debit = await bankTransactions().insertOne({
+    transferId, accountId: from._id, userId: from.userId, direction: "debit",
+    type, amountPaise, counterparty: to.accountNumber, reference, note,
+    status: "completed", createdAt: new Date(), actorEmail: actor?.email || null
+  });
+  try {
+    await bankTransactions().insertOne({
+      transferId, accountId: to._id, userId: to.userId, direction: "credit",
+      type, amountPaise, counterparty: from.accountNumber, reference, note,
+      status: "completed", createdAt: new Date(), actorEmail: actor?.email || null
+    });
+  } catch (error) {
+    await bankTransactions().deleteOne({ _id: debit.insertedId });
+    throw error;
+  }
+  return transferId;
+}
+
 const emailOk = value => typeof value === "string" && value.length <= 160 && /^\S+@\S+\.\S+$/.test(value);
 const signed = async (req, res, next) => {
   if (!req.session.user) return res.status(401).json({ error: "Please sign in." });
@@ -143,7 +191,13 @@ async function initialise() {
     requests().createIndex({ reference: 1 }, { unique: true }),
     requests().createIndex({ userId: 1, createdAt: -1 }),
     requests().createIndex({ branchName: 1, status: 1, createdAt: -1 }),
-    siteSettings().createIndex({ key: 1 }, { unique: true })
+    siteSettings().createIndex({ key: 1 }, { unique: true }),
+    bankAccounts().createIndex({ userId: 1 }, { unique: true }),
+    bankAccounts().createIndex({ accountNumber: 1 }, { unique: true }),
+    bankTransactions().createIndex({ accountId: 1, createdAt: -1 }),
+    bankTransactions().createIndex({ transferId: 1 }),
+    cashOperations().createIndex({ status: 1, branchName: 1, createdAt: -1 })
+
   ]);
   await bootstrapAccount(
     process.env.BOOTSTRAP_SITE_ADMIN_EMAIL,
@@ -223,7 +277,7 @@ app.post("/api/auth/register", authLimiter, async (req, res) => {
         !emailOk(normalizedEmail) || typeof password !== "string" || password.length < 10 || password.length > 128) {
       return res.status(400).json({ error: "Enter a valid name, email and password (10–128 characters)." });
     }
-    await users().insertOne({
+    const created = await users().insertOne({
       name: name.trim(),
       email: normalizedEmail,
       passwordHash: await bcrypt.hash(password, 12),
@@ -231,7 +285,8 @@ app.post("/api/auth/register", authLimiter, async (req, res) => {
       isActive: true,
       createdAt: new Date()
     });
-    res.status(201).json({ ok: true, message: "Customer demo account created. Sign in to continue." });
+    const demoAccount = await ensureDemoAccount({ id: String(created.insertedId), name: name.trim(), email: normalizedEmail, role: "customer" });
+    res.status(201).json({ ok: true, message: "Customer demo account created. Sign in to continue.", demoAccount: { accountNumber: demoAccount.accountNumber, balance: inr(demoAccount.balancePaise), currency: "INR", ifscDemo: demoAccount.ifscDemo } });
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 500).json({
       error: error.code === 11000 ? "Email already exists." : "Could not create account."
@@ -487,6 +542,145 @@ app.patch("/api/requests/:id/status", permit("headquarters", "branch", "manager"
   } catch (error) {
     res.status(500).json({ error: "Could not update request status." });
   }
+});
+
+
+
+// DEMO BANKING ENGINE — internal MongoDB simulation only; no external payment/bank APIs.
+app.get("/api/banking/account", permit("customer"), async (req, res) => {
+  try {
+    const account = await ensureDemoAccount(req.session.user);
+    res.json({ account: {
+      accountNumber: account.accountNumber, accountType: account.accountType,
+      balance: inr(account.balancePaise), currency: "INR", ifscDemo: account.ifscDemo,
+      branchName: account.branchName, status: account.status, mode: "DEMO"
+    } });
+  } catch (error) { res.status(500).json({ error: "Could not load demo account." }); }
+});
+
+app.get("/api/banking/transactions", permit("customer"), async (req, res) => {
+  try {
+    const account = await ensureDemoAccount(req.session.user);
+    const items = await bankTransactions().find({ accountId: account._id }).sort({ createdAt: -1 }).limit(100).toArray();
+    res.json({ transactions: items.map(item => ({
+      id: String(item._id), reference: item.reference, direction: item.direction,
+      type: item.type, amount: inr(item.amountPaise), counterparty: item.counterparty,
+      note: item.note, status: item.status, createdAt: item.createdAt
+    })) });
+  } catch (error) { res.status(500).json({ error: "Could not load demo statement." }); }
+});
+
+app.post("/api/banking/transfer", permit("customer"), async (req, res) => {
+  try {
+    const accountNumber = cleanText(req.body?.accountNumber, 30).toUpperCase();
+    const amountPaise = paise(req.body?.amount);
+    const note = cleanText(req.body?.note, 100);
+    if (!/^PCBD\d{12}$/.test(accountNumber) || !Number.isSafeInteger(amountPaise) || amountPaise < 100 || amountPaise > 5000000) {
+      return res.status(400).json({ error: "Enter a valid demo account number and amount between ₹1 and ₹50,000." });
+    }
+    const sender = await ensureDemoAccount(req.session.user);
+    if (sender.accountNumber === accountNumber) return res.status(400).json({ error: "You cannot transfer to your own account." });
+    const receiver = await bankAccounts().findOne({ accountNumber, status: "active" });
+    if (!receiver) return res.status(404).json({ error: "Demo beneficiary account not found." });
+    const debit = await bankAccounts().updateOne(
+      { _id: sender._id, status: "active", balancePaise: { $gte: amountPaise } },
+      { $inc: { balancePaise: -amountPaise }, $set: { updatedAt: new Date() } }
+    );
+    if (!debit.modifiedCount) return res.status(400).json({ error: "Insufficient demo balance or account unavailable." });
+    const credit = await bankAccounts().updateOne(
+      { _id: receiver._id, status: "active" },
+      { $inc: { balancePaise: amountPaise }, $set: { updatedAt: new Date() } }
+    );
+    if (!credit.modifiedCount) {
+      await bankAccounts().updateOne({ _id: sender._id }, { $inc: { balancePaise: amountPaise } });
+      return res.status(409).json({ error: "Beneficiary account changed. Demo transfer reversed." });
+    }
+    const reference = "PCBT" + randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
+    try {
+      await addLedgerPair({ from: sender, to: receiver, amountPaise, actor: req.session.user, type: "internal_transfer", reference, note });
+    } catch (error) {
+      await bankAccounts().updateOne({ _id: receiver._id }, { $inc: { balancePaise: -amountPaise } });
+      await bankAccounts().updateOne({ _id: sender._id }, { $inc: { balancePaise: amountPaise } });
+      throw error;
+    }
+    await audit(req.session.user, "DEMO_TRANSFER_COMPLETED", reference + " / ₹" + inr(amountPaise));
+    const updated = await bankAccounts().findOne({ _id: sender._id });
+    res.status(201).json({ ok: true, reference, amount: inr(amountPaise), balance: inr(updated.balancePaise), mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not complete demo transfer." }); }
+});
+
+app.post("/api/banking/cash-operations", permit("cashier", "branch", "manager", "headquarters"), async (req, res) => {
+  try {
+    const accountNumber = cleanText(req.body?.accountNumber, 30).toUpperCase();
+    const type = req.body?.type;
+    const amountPaise = paise(req.body?.amount);
+    const note = cleanText(req.body?.note, 120);
+    if (!/^PCBD\d{12}$/.test(accountNumber) || !["cash_deposit", "cash_withdrawal"].includes(type) ||
+        !Number.isSafeInteger(amountPaise) || amountPaise < 100 || amountPaise > 10000000) {
+      return res.status(400).json({ error: "Invalid demo cash operation. Amount limit is ₹1–₹1,00,000." });
+    }
+    const account = await bankAccounts().findOne({ accountNumber, status: "active" });
+    if (!account) return res.status(404).json({ error: "Demo account not found." });
+    const actor = req.session.user;
+    if (actor.role !== "headquarters" && actor.branchName && actor.branchName !== account.branchName) {
+      return res.status(403).json({ error: "Account belongs to another branch." });
+    }
+    const operation = {
+      reference: "PCBC" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase(),
+      accountId: account._id, accountNumber, userId: account.userId, type, amountPaise,
+      note, branchName: account.branchName, status: "pending",
+      createdBy: actor.email, createdAt: new Date()
+    };
+    await cashOperations().insertOne(operation);
+    await audit(actor, "DEMO_CASH_OPERATION_REQUESTED", operation.reference + " / " + type);
+    res.status(201).json({ ok: true, reference: operation.reference, status: operation.status, message: "Demo cash entry submitted for approval." });
+  } catch (error) { res.status(500).json({ error: "Could not create demo cash entry." }); }
+});
+
+app.get("/api/banking/cash-operations", permit("cashier", "branch", "manager", "headquarters"), async (req, res) => {
+  try {
+    const actor = req.session.user;
+    const filter = actor.role === "headquarters" ? {} : { branchName: actor.branchName || "" };
+    const items = await cashOperations().find(filter).sort({ createdAt: -1 }).limit(100).toArray();
+    res.json({ operations: items.map(item => ({
+      id: String(item._id), reference: item.reference, accountNumber: item.accountNumber,
+      type: item.type, amount: inr(item.amountPaise), status: item.status,
+      branchName: item.branchName, createdAt: item.createdAt
+    })) });
+  } catch (error) { res.status(500).json({ error: "Could not load cash operations." }); }
+});
+
+app.patch("/api/banking/cash-operations/:id/approve", permit("headquarters", "branch", "manager"), async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid operation id." });
+    const actor = req.session.user;
+    const filter = { _id: new ObjectId(req.params.id), status: "pending" };
+    if (actor.role !== "headquarters") filter.branchName = actor.branchName || "";
+    const operation = await cashOperations().findOne(filter);
+    if (!operation) return res.status(404).json({ error: "Pending operation not found in your branch." });
+    const delta = operation.type === "cash_deposit" ? operation.amountPaise : -operation.amountPaise;
+    const balanceFilter = { _id: operation.accountId, status: "active" };
+    if (delta < 0) balanceFilter.balancePaise = { $gte: operation.amountPaise };
+    const changed = await bankAccounts().updateOne(balanceFilter, { $inc: { balancePaise: delta }, $set: { updatedAt: new Date() } });
+    if (!changed.modifiedCount) return res.status(400).json({ error: "Insufficient demo balance or account unavailable." });
+    const reference = operation.reference;
+    try {
+      await bankTransactions().insertOne({
+        transferId: reference, accountId: operation.accountId, userId: operation.userId,
+        direction: delta > 0 ? "credit" : "debit", type: operation.type,
+        amountPaise: operation.amountPaise, counterparty: "BRANCH CASH DESK",
+        reference, note: operation.note, status: "completed", createdAt: new Date(), actorEmail: actor.email
+      });
+      const approved = await cashOperations().updateOne(filter, { $set: { status: "approved", approvedBy: actor.email, approvedAt: new Date() } });
+      if (!approved.modifiedCount) throw new Error("Operation was already processed.");
+    } catch (error) {
+      await bankTransactions().deleteOne({ transferId: reference });
+      await bankAccounts().updateOne({ _id: operation.accountId }, { $inc: { balancePaise: -delta } });
+      throw error;
+    }
+    await audit(actor, "DEMO_CASH_OPERATION_APPROVED", reference);
+    res.json({ ok: true, reference, status: "approved", mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not approve demo cash operation." }); }
 });
 
 app.use("/api", (req, res) => res.status(404).json({ error: "API route not found." }));
