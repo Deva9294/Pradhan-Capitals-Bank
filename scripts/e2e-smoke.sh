@@ -75,6 +75,24 @@ login customer customer.ci@example.com ci-customer-password-123 "$CUSTOMER_COOKI
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "Customer reads simulated banking account"
 jq -e '.account.mode == "DEMO" and .account.balance == 25000' "$TMP_DIR/body.json" >/dev/null
+CUSTOMER_ACCOUNT="$(jq -r '.account.accountNumber' "$TMP_DIR/body.json")"
+request POST "" "/api/auth/register" '{"name":"CI Beneficiary","email":"beneficiary.ci@example.com","password":"ci-beneficiary-password-123"}'
+expect 201 "$HTTP_CODE" "Beneficiary demo registration"
+BENEFICIARY_ACCOUNT="$(jq -r '.demoAccount.accountNumber' "$TMP_DIR/body.json")"
+BENEFICIARY_COOKIE="$TMP_DIR/beneficiary.cookie"
+login customer beneficiary.ci@example.com ci-beneficiary-password-123 "$BENEFICIARY_COOKIE"
+request POST "$CUSTOMER_COOKIE" "/api/banking/transfer" "$(jq -nc --arg accountNumber "$BENEFICIARY_ACCOUNT" '{accountNumber:$accountNumber,amount:500,note:"CI transfer"}')"
+expect 201 "$HTTP_CODE" "Internal demo transfer"
+TRANSFER_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Sender demo balance updated"
+jq -e '.account.balance == 24500' "$TMP_DIR/body.json" >/dev/null
+request GET "$BENEFICIARY_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Beneficiary demo balance updated"
+jq -e '.account.balance == 25500' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
+expect 200 "$HTTP_CODE" "Demo passbook statement"
+jq -e --arg ref "$TRANSFER_REF" 'any(.transactions[]; .reference == $ref and .direction == "debit")' "$TMP_DIR/body.json" >/dev/null
 request POST "$CUSTOMER_COOKIE" "/api/requests" '{"type":"account_information","branchName":"Bhopal Test","note":"Automated CI request"}'
 expect 201 "$HTTP_CODE" "Customer creates demo request"
 REQUEST_REF="$(jq -r '.request.reference' "$TMP_DIR/body.json")"
