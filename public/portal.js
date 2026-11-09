@@ -67,10 +67,11 @@ if ($("#loginRole")) {
         body: JSON.stringify({
           name: $("#regName").value,
           email: $("#regEmail").value,
-          password: $("#regPassword").value
+          password: $("#regPassword").value,
+          branchName: $("#regBranch").value
         })
       });
-      showMessage("#registerMessage", "Account created. You can now sign in.");
+      showMessage("#registerMessage", "Application submitted. Sign in to track branch review and approval.");
       $("#email").value = $("#regEmail").value;
       $("#password").value = $("#regPassword").value;
     } catch (error) {
@@ -132,6 +133,37 @@ async function loadRequests() {
   }).join("") || '<tr><td colspan="7">No demo requests found.</td></tr>';
 }
 
+async function loadAccountOpening() {
+  const role = window.currentPortalRole;
+  if (role === "customer") {
+    const data = await api("/api/account-opening/my");
+    $("#customerAccountOpening").classList.remove("hidden");
+    if (data.account) {
+      $("#accountOpeningStatus").textContent = "Approved — demo account " + data.account.accountNumber + " is active.";
+      $("#accountOpeningDetails").textContent = "Your demo account is ready. Banking features are available below.";
+      return true;
+    }
+    const app = data.application;
+    $("#accountOpeningStatus").textContent = app ? app.status.replaceAll("_", " ").toUpperCase() : "Application not found";
+    $("#accountOpeningDetails").textContent = app ? "Reference: " + app.reference + " · Branch: " + app.branchName : "Please contact the branch to submit an application.";
+    return false;
+  }
+  if (["headquarters", "manager", "branch", "staff"].includes(role)) {
+    $("#accountOpeningQueue").classList.remove("hidden");
+    await loadAccountOpeningQueue();
+  }
+  return false;
+}
+async function loadAccountOpeningQueue() {
+  const data = await api("/api/account-opening/queue");
+  const role = window.currentPortalRole;
+  $("#accountOpeningRows").innerHTML = (data.applications || []).map(item => {
+    let action = "—";
+    if (role === "staff" && item.status === "submitted") action = '<button class="btn outline account-review" type="button" data-id="' + escapeHtml(item.id) + '">Mark reviewed</button>';
+    if (["manager", "headquarters"].includes(role) && item.status === "under_review") action = '<button class="btn outline account-decision" data-decision="approve" type="button" data-id="' + escapeHtml(item.id) + '">Approve</button> <button class="btn outline account-decision" data-decision="reject" type="button" data-id="' + escapeHtml(item.id) + '">Reject</button>';
+    return "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + escapeHtml(item.customerName) + "<br><small>" + escapeHtml(item.customerEmail) + "</small></td><td>" + escapeHtml(item.branchName) + "</td><td>" + escapeHtml(item.status.replaceAll("_", " ")) + "</td><td>" + escapeHtml(formatDate(item.createdAt)) + "</td><td>" + action + "</td></tr>";
+  }).join("") || '<tr><td colspan="6">No account applications in this queue.</td></tr>';
+}
 async function loadBanking() {
   const data = await api("/api/banking/account");
   const account = data.account;
@@ -295,18 +327,19 @@ async function loadPortal() {
       $("#siteSettingsCard").classList.remove("hidden");
       await loadSiteSettingsForm();
     }
-    if (role === "customer") $("#customerRequestCard").classList.remove("hidden");
     if (role === "customer") {
-      $("#customerBankingCard").classList.remove("hidden");
-      await loadBanking();
+      $("#customerRequestCard").classList.remove("hidden");
+      const approved = await loadAccountOpening();
+      if (approved) {
+        $("#customerBankingCard").classList.remove("hidden");
+        $("#customerProductsCard").classList.remove("hidden");
+        $("#customerRDCard").classList.remove("hidden");
+        $("#customerLoanCard").classList.remove("hidden");
+        $("#customerCardCheque").classList.remove("hidden");
+        await Promise.all([loadBanking(), loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans(), loadDemoCard(), loadChequeBooks()]);
+      }
     }
-    if (role === "customer") {
-      $("#customerProductsCard").classList.remove("hidden");
-      $("#customerRDCard").classList.remove("hidden");
-      $("#customerLoanCard").classList.remove("hidden");
-      $("#customerCardCheque").classList.remove("hidden");
-      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans(), loadDemoCard(), loadChequeBooks()]);
-    }
+    if (["headquarters", "manager", "branch", "staff"].includes(role)) await loadAccountOpening();
     if (["headquarters", "branch", "manager"].includes(role)) {
       $("#loanOperationsCard").classList.remove("hidden");
       $("#chequeBookQueue").classList.remove("hidden");
@@ -639,6 +672,23 @@ $("#customerRequestForm")?.addEventListener("submit", async event => {
     showMessage("#customerRequestMessage", error.message);
   }
 });
+
+$("#accountOpeningRows")?.addEventListener("click", async event => {
+  const review = event.target.closest(".account-review"), decision = event.target.closest(".account-decision"), button = review || decision;
+  if (!button) return;
+  button.disabled = true;
+  try {
+    if (review) {
+      await api("/api/account-opening/" + encodeURIComponent(button.dataset.id) + "/review", { method: "PATCH", body: JSON.stringify({ note: "Sample details reviewed by branch staff." }) });
+      showMessage("#accountOpeningMessage", "Application reviewed and sent to Branch Manager.");
+    } else {
+      const result = await api("/api/account-opening/" + encodeURIComponent(button.dataset.id) + "/decision", { method: "PATCH", body: JSON.stringify({ decision: button.dataset.decision, note: "Demo application decision." }) });
+      showMessage("#accountOpeningMessage", result.status === "approved" ? "Approved. Demo account " + result.accountNumber + " created." : "Application rejected.");
+    }
+    await loadAccountOpeningQueue();
+  } catch (error) { showMessage("#accountOpeningMessage", error.message); button.disabled = false; }
+});
+$("#refreshAccountOpening")?.addEventListener("click", loadAccountOpeningQueue);
 
 $("#requestRows")?.addEventListener("click", async event => {
   const button = event.target.closest(".request-update-btn");
