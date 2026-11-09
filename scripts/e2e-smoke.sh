@@ -111,6 +111,26 @@ jq -e '.account.balance == 23500' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/fixed-deposits"
 expect 200 "$HTTP_CODE" "Customer reads fixed deposit portfolio"
 jq -e --arg ref "$FD_REF" 'any(.fixedDeposits[]; .reference == $ref and .status == "active")' "$TMP_DIR/body.json" >/dev/null
+request POST "$CUSTOMER_COOKIE" "/api/banking/recurring-deposits" '{"monthlyAmount":500,"tenureMonths":6}'
+expect 201 "$HTTP_CODE" "Customer opens demo recurring deposit"
+RD_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
+jq -e '.rate == 6.5 and .tenureMonths == 6 and .maturityAmount > 3000' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/recurring-deposits"
+expect 200 "$HTTP_CODE" "Customer reads recurring deposit portfolio"
+RD_ID="$(jq -r --arg ref "$RD_REF" '.recurringDeposits[] | select(.reference == $ref) | .id' "$TMP_DIR/body.json")"
+test -n "$RD_ID"
+jq -e --arg ref "$RD_REF" 'any(.recurringDeposits[]; .reference == $ref and .paidInstallments == 0 and .status == "active")' "$TMP_DIR/body.json" >/dev/null
+request POST "$CUSTOMER_COOKIE" "/api/banking/recurring-deposits/$RD_ID/pay" '{}'
+expect 200 "$HTTP_CODE" "Customer manually pays first recurring deposit installment"
+jq -e '.ok == true and .installmentNumber == 1 and .paidAmount == 500 and .status == "active"' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
+expect 200 "$HTTP_CODE" "Passbook records recurring deposit installment"
+jq -e --arg ref "$RD_REF" 'any(.transactions[]; .reference == ($ref + "-I01") and .type == "demo_rd_installment" and .direction == "debit")' "$TMP_DIR/body.json" >/dev/null
+request POST "$BENEFICIARY_COOKIE" "/api/banking/recurring-deposits/$RD_ID/pay" '{}'
+expect 404 "$HTTP_CODE" "Another customer cannot pay this recurring deposit"
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Recurring deposit installment debits customer demo balance"
+jq -e '.account.balance == 23000' "$TMP_DIR/body.json" >/dev/null
 request POST "$CUSTOMER_COOKIE" "/api/banking/loans" '{"amount":10000,"tenureMonths":12,"purpose":"CI demo education loan"}'
 expect 201 "$HTTP_CODE" "Customer submits demo loan application"
 LOAN_REF="$(jq -r '.reference' "$TMP_DIR/body.json")"
@@ -122,7 +142,7 @@ request PATCH "$MANAGER_COOKIE" "/api/banking/loans/$LOAN_ID/decision" '{"decisi
 expect 200 "$HTTP_CODE" "Manager approves demo loan and simulates disbursement"
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
 expect 200 "$HTTP_CODE" "Demo loan disbursement updates customer balance"
-jq -e '.account.balance == 33500' "$TMP_DIR/body.json" >/dev/null
+jq -e '.account.balance == 33000' "$TMP_DIR/body.json" >/dev/null
 request GET "$CUSTOMER_COOKIE" "/api/banking/transactions"
 expect 200 "$HTTP_CODE" "Passbook includes demo loan disbursement"
 jq -e --arg ref "$LOAN_REF" 'any(.transactions[]; .reference == $ref and .type == "demo_loan_disbursement")' "$TMP_DIR/body.json" >/dev/null
