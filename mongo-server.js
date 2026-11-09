@@ -73,6 +73,7 @@ const recurringDeposits = () => db.collection("demo_recurring_deposits");
 const loanApplications = () => db.collection("demo_loan_applications");
 const demoCards = () => db.collection("demo_cards");
 const chequeBooks = () => db.collection("demo_cheque_books");
+const accountOpeningApplications = () => db.collection("account_opening_applications");
 const paise = value => Math.round(Number(value) * 100);
 const inr = value => Number((Number(value || 0) / 100).toFixed(2));
 
@@ -156,6 +157,13 @@ const signed = async (req, res, next) => {
 const permit = (...allowed) => (req, res, next) => signed(req, res, () =>
   allowed.includes(req.session.user.role) ? next() : res.status(403).json({ error: "Not permitted." })
 );
+const permitCustomerAccount = (req, res, next) => signed(req, res, async () => {
+  if (req.session.user.role !== "customer") return res.status(403).json({ error: "Not permitted." });
+  try { const account = await bankAccounts().findOne({ userId: req.session.user.id }, { projection: { _id: 1 } });
+    if (!account) return res.status(403).json({ error: "Your demo account is pending approval. Banking features unlock after Branch Manager or HQ approval." });
+    next();
+  } catch (error) { res.status(503).json({ error: "Could not verify demo account status." }); }
+});
 const publicUser = user => ({
   id: String(user._id),
   name: user.name,
@@ -226,7 +234,10 @@ async function initialise() {
     chequeBooks().createIndex({ userId: 1, createdAt: -1 }),
     chequeBooks().createIndex({ reference: 1 }, { unique: true }),
     loanApplications().createIndex({ userId: 1, createdAt: -1 }),
-    loanApplications().createIndex({ status: 1, branchName: 1, createdAt: -1 })
+    loanApplications().createIndex({ status: 1, branchName: 1, createdAt: -1 }),
+    accountOpeningApplications().createIndex({ reference: 1 }, { unique: true }),
+    accountOpeningApplications().createIndex({ userId: 1, createdAt: -1 }),
+    accountOpeningApplications().createIndex({ branchName: 1, status: 1, createdAt: -1 })
 
   ]);
   await bootstrapAccount(
@@ -311,12 +322,13 @@ app.post("/api/auth/register", authLimiter, async (req, res) => {
       name: name.trim(),
       email: normalizedEmail,
       passwordHash: await bcrypt.hash(password, 12),
-      role: "customer",
-      isActive: true,
-      createdAt: new Date()
+      role: "customer", isActive: true, accountOpeningStatus: "pending", createdAt: new Date()
     });
-    const demoAccount = await ensureDemoAccount({ id: String(created.insertedId), name: name.trim(), email: normalizedEmail, role: "customer" });
-    res.status(201).json({ ok: true, message: "Customer demo account created. Sign in to continue.", demoAccount: { accountNumber: demoAccount.accountNumber, balance: inr(demoAccount.balancePaise), currency: "INR", ifscDemo: demoAccount.ifscDemo } });
+    const branchName = cleanText(req.body?.branchName, 100) || "Demo Digital Branch";
+    const reference = "OPEN-" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+    await accountOpeningApplications().insertOne({ reference, userId: String(created.insertedId), customerName: name.trim(), customerEmail: normalizedEmail, branchName, accountType: "SAVINGS_DEMO", status: "submitted", staffNote: "", decisionNote: "", createdAt: new Date(), updatedAt: new Date() });
+    await audit({ id: String(created.insertedId), name: name.trim(), email: normalizedEmail }, "DEMO_ACCOUNT_APPLICATION_SUBMITTED", reference + " / " + branchName);
+    res.status(201).json({ ok: true, message: "Registration complete. Your demo account application is awaiting branch review.", application: { reference, status: "submitted", branchName } });
   } catch (error) {
     res.status(error.code === 11000 ? 409 : 500).json({
       error: error.code === 11000 ? "Email already exists." : "Could not create account."
@@ -391,12 +403,18 @@ app.get("/api/portal/summary", signed, async (req, res) => {
         { label: "Mode", value: "Prototype" }
       ];
     } else if (role === "customer") {
-      const demoAccount = await ensureDemoAccount(user);
-      cards = [
+      const demoAccount = await bankAccounts().findOne({ userId: user.id });
+      const application = await accountOpeningApplications().findOne({ userId: user.id }, { sort: { createdAt: -1 } });
+      cards = demoAccount ? [
         { label: "Available demo balance", value: "₹" + inr(demoAccount.balancePaise).toLocaleString("en-IN") },
         { label: "Demo account", value: demoAccount.accountNumber },
         { label: "My demo requests", value: await requests().countDocuments({ userId: user.id }) },
         { label: "Account status", value: "Active • Demo" }
+      ] : [
+        { label: "Account application", value: application?.reference || "Not submitted" },
+        { label: "Application status", value: application?.status || "Pending" },
+        { label: "Assigned branch", value: application?.branchName || "To be assigned" },
+        { label: "Banking access", value: "Locked until approval" }
       ];
     } else {
       const branchFilter = { branchName: user.branchName || "" };
@@ -519,6 +537,59 @@ app.patch("/api/portal/users/:id/status", permit("headquarters"), async (req, re
   } catch (error) {
     res.status(500).json({ error: "Could not update account status." });
   }
+});
+
+// DEMO ACCOUNT OPENING — staff review followed by manager/HQ decision.
+app.get("/api/account-opening/my", permit("customer"), async (req, res) => {
+  const application = await accountOpeningApplications().findOne({ userId: req.session.user.id }, { sort: { createdAt: -1 } });
+  const account = await bankAccounts().findOne({ userId: req.session.user.id }, { projection: { accountNumber: 1, accountType: 1, status: 1 } });
+  res.json({ application: application ? { reference: application.reference, branchName: application.branchName, status: application.status, staffNote: application.staffNote || "", decisionNote: application.decisionNote || "", createdAt: application.createdAt } : null, account: account ? { accountNumber: account.accountNumber, accountType: account.accountType, status: account.status } : null });
+});
+app.get("/api/account-opening/queue", permit("headquarters", "manager", "branch", "staff"), async (req, res) => {
+  const user = req.session.user;
+  const filter = user.role === "headquarters" ? {} : { branchName: user.branchName || "" };
+  const items = await accountOpeningApplications().find(filter).sort({ createdAt: -1 }).limit(200).toArray();
+  res.json({ applications: items.map(item => ({ id: String(item._id), reference: item.reference, customerName: item.customerName, customerEmail: item.customerEmail, branchName: item.branchName, status: item.status, createdAt: item.createdAt })) });
+});
+app.patch("/api/account-opening/:id/review", permit("staff"), async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid application id." });
+    const filter = { _id: new ObjectId(req.params.id), branchName: req.session.user.branchName || "", status: "submitted" };
+    const item = await accountOpeningApplications().findOneAndUpdate(filter, { $set: { status: "under_review", staffNote: cleanText(req.body?.note, 300), reviewedBy: req.session.user.email, updatedAt: new Date() } }, { returnDocument: "after" });
+    if (!item) return res.status(404).json({ error: "Submitted application not found in your branch." });
+    await audit(req.session.user, "DEMO_ACCOUNT_APPLICATION_REVIEWED", item.reference);
+    res.json({ ok: true, status: item.status });
+  } catch (error) { res.status(500).json({ error: "Could not review account application." }); }
+});
+app.patch("/api/account-opening/:id/decision", permit("headquarters", "manager"), async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid application id." });
+    const decision = req.body?.decision, note = cleanText(req.body?.note, 300);
+    if (!["approve", "reject"].includes(decision)) return res.status(400).json({ error: "Choose approve or reject." });
+    const filter = { _id: new ObjectId(req.params.id), status: "under_review" };
+    if (req.session.user.role === "manager") filter.branchName = req.session.user.branchName || "";
+    const application = await accountOpeningApplications().findOne(filter);
+    if (!application) return res.status(404).json({ error: "Reviewed application not found in your permitted branch." });
+    const changed = await accountOpeningApplications().updateOne(filter, { $set: { status: decision === "approve" ? "approving" : "rejected", decisionNote: note, decidedBy: req.session.user.email, updatedAt: new Date() } });
+    if (!changed.modifiedCount) return res.status(409).json({ error: "Application was already processed." });
+    if (decision === "reject") {
+      await users().updateOne({ _id: new ObjectId(application.userId) }, { $set: { accountOpeningStatus: "rejected" } });
+      await audit(req.session.user, "DEMO_ACCOUNT_APPLICATION_REJECTED", application.reference);
+      return res.json({ ok: true, status: "rejected" });
+    }
+    try {
+      await users().updateOne({ _id: new ObjectId(application.userId) }, { $set: { accountOpeningStatus: "approved", branchName: application.branchName } });
+      const customer = await users().findOne({ _id: new ObjectId(application.userId), role: "customer" });
+      if (!customer) throw new Error("Customer profile not found.");
+      const account = await ensureDemoAccount({ id: application.userId, name: customer.name, email: customer.email, role: "customer", branchName: application.branchName });
+      await accountOpeningApplications().updateOne({ _id: application._id, status: "approving" }, { $set: { status: "approved", accountNumber: account.accountNumber, updatedAt: new Date() } });
+      await audit(req.session.user, "DEMO_ACCOUNT_APPLICATION_APPROVED", application.reference + " / " + account.accountNumber);
+      return res.json({ ok: true, status: "approved", accountNumber: account.accountNumber });
+    } catch (error) {
+      await accountOpeningApplications().updateOne({ _id: application._id, status: "approving" }, { $set: { status: "under_review", updatedAt: new Date() } });
+      throw error;
+    }
+  } catch (error) { res.status(500).json({ error: "Could not process account-opening decision." }); }
 });
 
 app.post("/api/requests", permit("customer"), async (req, res) => {
