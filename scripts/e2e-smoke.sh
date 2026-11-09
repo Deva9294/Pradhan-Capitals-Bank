@@ -68,17 +68,36 @@ login staff staff.ci@example.com ci-staff-password-123 "$STAFF_COOKIE"
 login cashier cashier.ci@example.com ci-cashier-password-123 "$CASHIER_COOKIE"
 request GET "$CASHIER_COOKIE" "/api/requests"
 expect 403 "$HTTP_CODE" "Cashier cannot access customer request records"
-request POST "" "/api/auth/register" '{"name":"CI Customer","email":"customer.ci@example.com","password":"ci-customer-password-123"}'
-expect 201 "$HTTP_CODE" "Customer registration"
-jq -e '.demoAccount.accountNumber | startswith("PCBD")' "$TMP_DIR/body.json" >/dev/null
+request POST "" "/api/auth/register" '{"name":"CI Customer","email":"customer.ci@example.com","password":"ci-customer-password-123","branchName":"Bhopal Test"}'
+expect 201 "$HTTP_CODE" "Customer registration submits pending account application"
+jq -e '.application.status == "submitted" and (.application.reference | startswith("OPEN-"))' "$TMP_DIR/body.json" >/dev/null
 login customer customer.ci@example.com ci-customer-password-123 "$CUSTOMER_COOKIE"
 request GET "$CUSTOMER_COOKIE" "/api/banking/account"
-expect 200 "$HTTP_CODE" "Customer reads simulated banking account"
+expect 403 "$HTTP_CODE" "Pending customer cannot use banking before approval"
+request GET "$STAFF_COOKIE" "/api/account-opening/queue"
+expect 200 "$HTTP_CODE" "Staff sees branch account-opening queue"
+OPENING_ID="$(jq -r '.applications[] | select(.customerEmail == "customer.ci@example.com") | .id' "$TMP_DIR/body.json")"
+test -n "$OPENING_ID"
+request PATCH "$STAFF_COOKIE" "/api/account-opening/$OPENING_ID/review" '{"note":"CI sample review"}'
+expect 200 "$HTTP_CODE" "Staff reviews customer account application"
+request PATCH "$MANAGER_COOKIE" "/api/account-opening/$OPENING_ID/decision" '{"decision":"approve","note":"CI sample approval"}'
+expect 200 "$HTTP_CODE" "Manager approves and creates demo account"
+jq -e '.status == "approved" and (.accountNumber | startswith("PCBD"))' "$TMP_DIR/body.json" >/dev/null
+request GET "$CUSTOMER_COOKIE" "/api/banking/account"
+expect 200 "$HTTP_CODE" "Approved customer reads simulated banking account"
 jq -e '.account.mode == "DEMO" and .account.balance == 25000' "$TMP_DIR/body.json" >/dev/null
 CUSTOMER_ACCOUNT="$(jq -r '.account.accountNumber' "$TMP_DIR/body.json")"
-request POST "" "/api/auth/register" '{"name":"CI Beneficiary","email":"beneficiary.ci@example.com","password":"ci-beneficiary-password-123"}'
-expect 201 "$HTTP_CODE" "Beneficiary demo registration"
-BENEFICIARY_ACCOUNT="$(jq -r '.demoAccount.accountNumber' "$TMP_DIR/body.json")"
+request POST "" "/api/auth/register" '{"name":"CI Beneficiary","email":"beneficiary.ci@example.com","password":"ci-beneficiary-password-123","branchName":"Bhopal Test"}'
+expect 201 "$HTTP_CODE" "Beneficiary registration submits account application"
+request GET "$STAFF_COOKIE" "/api/account-opening/queue"
+expect 200 "$HTTP_CODE" "Staff sees second account application"
+BENEFICIARY_OPENING_ID="$(jq -r '.applications[] | select(.customerEmail == "beneficiary.ci@example.com") | .id' "$TMP_DIR/body.json")"
+test -n "$BENEFICIARY_OPENING_ID"
+request PATCH "$STAFF_COOKIE" "/api/account-opening/$BENEFICIARY_OPENING_ID/review" '{"note":"CI sample review"}'
+expect 200 "$HTTP_CODE" "Staff reviews beneficiary application"
+request PATCH "$MANAGER_COOKIE" "/api/account-opening/$BENEFICIARY_OPENING_ID/decision" '{"decision":"approve","note":"CI sample approval"}'
+expect 200 "$HTTP_CODE" "Manager approves beneficiary demo account"
+BENEFICIARY_ACCOUNT="$(jq -r '.accountNumber' "$TMP_DIR/body.json")"
 request POST "$CUSTOMER_COOKIE" "/api/banking/beneficiaries" "$(jq -nc --arg accountNumber "$BENEFICIARY_ACCOUNT" '{name:"CI Saved Beneficiary",accountNumber:$accountNumber}')"
 expect 201 "$HTTP_CODE" "Customer saves demo beneficiary"
 request GET "$CUSTOMER_COOKIE" "/api/banking/beneficiaries"
