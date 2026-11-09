@@ -183,6 +183,36 @@ async function loadRecurringDeposits() {
       "</td><td>" + escapeHtml(item.status) + " " + action + "</td></tr>";
   }).join("") || '<tr><td colspan="7">No recurring deposits yet.</td></tr>';
 }
+
+async function loadDemoCard() {
+  const data = await api("/api/banking/cards");
+  const card = data.card;
+  $("#demoCardPanel").innerHTML = card
+    ? '<div class="row"><div><strong>PRADHAN CAPITALS BANK</strong><div class="muted">VIRTUAL DEBIT · DEMO</div></div><span class="security">' + escapeHtml(card.status.toUpperCase()) + '</span></div><h2 style="letter-spacing:3px;margin:20px 0">•••• •••• •••• ' + escapeHtml(card.last4) + '</h2><div class="row"><span>' + escapeHtml(card.holderName) + '</span><span>DEMO</span></div><p class="muted">Ref: ' + escapeHtml(card.reference) + '</p>'
+      : '<p class="muted">No virtual demo card issued yet.</p>';
+  $("#issueDemoCard").disabled = !!card;
+  $("#issueDemoCard").textContent = card ? "Demo card already issued" : "Issue virtual demo debit card";
+  $("#cardStatusAction").innerHTML = card
+    ? '<button class="btn ' + (card.status === "frozen" ? "" : "outline") + '" type="button" id="toggleDemoCard">' + (card.status === "frozen" ? "Unfreeze card" : "Freeze card") + '</button>'
+    : "";
+}
+async function loadChequeBooks() {
+  const data = await api("/api/banking/cheque-books");
+  $("#chequeBookRows").innerHTML = (data.chequeBooks || []).map(item =>
+    "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + item.leaves +
+    "</td><td>" + escapeHtml(formatDate(item.requestedAt)) + "</td><td>" +
+    escapeHtml(item.issuedAt ? formatDate(item.issuedAt) : "—") + "</td><td>" +
+    escapeHtml(item.status) + "</td></tr>"
+  ).join("") || '<tr><td colspan="5">No cheque book requests.</td></tr>';
+}
+async function loadChequeQueue() {
+  const data = await api("/api/banking/cheque-books/queue");
+  $("#chequeQueueRows").innerHTML = (data.requests || []).map(item =>
+    "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + escapeHtml(item.customerName) +
+    "</td><td>" + item.leaves + "</td><td>" + escapeHtml(item.branchName) +
+    '</td><td><button class="btn cheque-issue" type="button" data-id="' + escapeHtml(item.id) + '">Mark issued</button></td></tr>'
+  ).join("") || '<tr><td colspan="5">No pending cheque book requests.</td></tr>';
+}
 async function loadLoans() {
   const data = await api("/api/banking/loans");
   const items = data.loans || [];
@@ -274,11 +304,13 @@ async function loadPortal() {
       $("#customerProductsCard").classList.remove("hidden");
       $("#customerRDCard").classList.remove("hidden");
       $("#customerLoanCard").classList.remove("hidden");
-      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans()]);
+      $("#customerCardCheque").classList.remove("hidden");
+      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans(), loadDemoCard(), loadChequeBooks()]);
     }
     if (["headquarters", "branch", "manager"].includes(role)) {
       $("#loanOperationsCard").classList.remove("hidden");
-      await loadLoans();
+      $("#chequeBookQueue").classList.remove("hidden");
+      await Promise.all([loadLoans(), loadChequeQueue()]);
     }
     if (["cashier", "branch", "manager", "headquarters"].includes(role)) {
       $("#cashierBankingCard").classList.remove("hidden");
@@ -482,6 +514,45 @@ $("#rdForm")?.addEventListener("submit", async event => {
   } catch (error) { showMessage("#rdMessage", error.message); }
 });
 $("#refreshRDs")?.addEventListener("click", loadRecurringDeposits);
+
+$("#issueDemoCard")?.addEventListener("click", async () => {
+  $("#issueDemoCard").disabled = true;
+  try {
+    await api("/api/banking/cards", { method: "POST", body: "{}" });
+    showMessage("#cardMessage", "Virtual demo debit card issued.");
+    await loadDemoCard();
+  } catch (error) { showMessage("#cardMessage", error.message); $("#issueDemoCard").disabled = false; }
+});
+$("#demoCardPanel")?.addEventListener("click", async event => {
+  if (event.target.id !== "toggleDemoCard") return;
+  const data = await api("/api/banking/cards");
+  const next = data.card.status === "frozen" ? "active" : "frozen";
+  try {
+    await api("/api/banking/cards/status", { method: "PATCH", body: JSON.stringify({ status: next }) });
+    showMessage("#cardMessage", "Demo card " + next + ".");
+    await loadDemoCard();
+  } catch (error) { showMessage("#cardMessage", error.message); }
+});
+$("#chequeBookForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  try {
+    const result = await api("/api/banking/cheque-books", { method: "POST", body: JSON.stringify({ leaves: $("#chequeLeaves").value }) });
+    showMessage("#chequeMessage", "Request submitted: " + result.reference);
+    await loadChequeBooks();
+  } catch (error) { showMessage("#chequeMessage", error.message); }
+});
+$("#refreshChequeQueue")?.addEventListener("click", loadChequeQueue);
+$("#chequeQueueRows")?.addEventListener("click", async event => {
+  const button = event.target.closest(".cheque-issue");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api("/api/banking/cheque-books/" + encodeURIComponent(button.dataset.id) + "/issue", { method: "PATCH", body: "{}" });
+    showMessage("#chequeQueueMessage", "Cheque book marked as issued.");
+    await loadChequeQueue();
+  } catch (error) { showMessage("#chequeQueueMessage", error.message); button.disabled = false; }
+});
+
 $("#rdRows")?.addEventListener("click", async event => {
   const button = event.target.closest(".rd-pay");
   if (!button) return;
