@@ -874,8 +874,7 @@ app.post("/api/banking/recurring-deposits/:id/pay", permit("customer"), async (r
   const claim = await recurringDeposits().updateOne(
     { _id: rd._id, userId, status: "active", paidInstallments: rd.paidInstallments },
     { $set: { status: finalInstallment ? "maturing" : "active", lastPaymentReference: reference, updatedAt: new Date() },
-      $inc: { paidInstallments: 1 },
-      ...(finalInstallment ? {} : { $setOnInsert: {} })
+      $inc: { paidInstallments: 1 }
     }
   );
   if (!claim.modifiedCount) return res.status(409).json({ error: "This installment was already processed. Refresh the RD list." });
@@ -924,7 +923,7 @@ app.post("/api/banking/recurring-deposits/:id/pay", permit("customer"), async (r
     if (maturityCredited) await bankAccounts().updateOne({ _id: rd.accountId }, { $inc: { balancePaise: -rd.maturityAmountPaise } });
     if (installmentLedger) await bankTransactions().deleteOne({ transferId: reference });
     if (debited) await bankAccounts().updateOne({ _id: rd.accountId }, { $inc: { balancePaise: rd.monthlyAmountPaise } });
-    await recurringDeposits().updateOne({ _id: rd._id }, { $set: { status: "active", paidInstallments: rd.paidInstallments, nextDueAt: rd.nextDueAt, lastPaymentReference: null } });
+    await recurringDeposits().updateOne({ _id: rd._id }, { $set: { status: "active", paidInstallments: rd.paidInstallments, nextDueAt: rd.nextDueAt, lastPaymentReference: null }, $unset: { maturedAt: "" } });
     return res.status(400).json({ error: error.message || "Could not process demo RD installment." });
   }
 });
