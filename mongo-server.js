@@ -71,6 +71,8 @@ const beneficiaries = () => db.collection("demo_beneficiaries");
 const fixedDeposits = () => db.collection("demo_fixed_deposits");
 const recurringDeposits = () => db.collection("demo_recurring_deposits");
 const loanApplications = () => db.collection("demo_loan_applications");
+const demoCards = () => db.collection("demo_cards");
+const chequeBooks = () => db.collection("demo_cheque_books");
 const paise = value => Math.round(Number(value) * 100);
 const inr = value => Number((Number(value || 0) / 100).toFixed(2));
 
@@ -220,6 +222,9 @@ async function initialise() {
     beneficiaries().createIndex({ userId: 1, accountNumber: 1 }, { unique: true }),
     fixedDeposits().createIndex({ userId: 1, status: 1, maturityAt: 1 }),
     recurringDeposits().createIndex({ userId: 1, status: 1, createdAt: -1 }),
+    demoCards().createIndex({ userId: 1 }, { unique: true }),
+    chequeBooks().createIndex({ userId: 1, createdAt: -1 }),
+    chequeBooks().createIndex({ reference: 1 }, { unique: true }),
     loanApplications().createIndex({ userId: 1, createdAt: -1 }),
     loanApplications().createIndex({ status: 1, branchName: 1, createdAt: -1 })
 
@@ -951,6 +956,63 @@ app.post("/api/banking/loans", permit("customer"), async (req, res) => {
     await audit(req.session.user, "DEMO_LOAN_APPLIED", reference + " / ₹" + inr(amountPaise));
     res.status(201).json({ ok: true, reference, status: "pending", mode: "DEMO" });
   } catch (error) { res.status(500).json({ error: "Could not submit demo loan application." }); }
+});
+
+
+app.get("/api/banking/cards", permit("customer"), async (req, res) => {
+  const card = await demoCards().findOne({ userId: req.session.user.id });
+  res.json({ card: card ? { id: String(card._id), reference: card.reference, holderName: card.holderName, last4: card.last4, network: card.network, cardType: card.cardType, status: card.status, issuedAt: card.issuedAt } : null, mode: "DEMO" });
+});
+app.post("/api/banking/cards", permit("customer"), async (req, res) => {
+  try {
+    if (await demoCards().findOne({ userId: req.session.user.id })) return res.status(409).json({ error: "A demo debit card already exists." });
+    const account = await ensureDemoAccount(req.session.user);
+    const card = { userId: req.session.user.id, accountId: account._id, reference: "PCDC" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase(), holderName: cleanText(req.session.user.name, 80).toUpperCase(), last4: String(Math.floor(1000 + Math.random() * 9000)), network: "DEMO", cardType: "VIRTUAL DEBIT", status: "active", issuedAt: new Date(), createdAt: new Date() };
+    const inserted = await demoCards().insertOne(card);
+    await audit(req.session.user, "DEMO_CARD_ISSUED", card.reference);
+    res.status(201).json({ ok: true, card: { id: String(inserted.insertedId), reference: card.reference, holderName: card.holderName, last4: card.last4, network: card.network, cardType: card.cardType, status: card.status, issuedAt: card.issuedAt }, mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not issue demo debit card." }); }
+});
+app.patch("/api/banking/cards/status", permit("customer"), async (req, res) => {
+  const status = req.body?.status;
+  if (!["active", "frozen"].includes(status)) return res.status(400).json({ error: "Choose active or frozen." });
+  const result = await demoCards().findOneAndUpdate({ userId: req.session.user.id }, { $set: { status, updatedAt: new Date() } }, { returnDocument: "after" });
+  const card = result?.value || result;
+  if (!card) return res.status(404).json({ error: "Issue a demo card first." });
+  await audit(req.session.user, status === "frozen" ? "DEMO_CARD_FROZEN" : "DEMO_CARD_UNFROZEN", card.reference);
+  res.json({ ok: true, status: card.status, reference: card.reference, mode: "DEMO" });
+});
+app.get("/api/banking/cheque-books", permit("customer"), async (req, res) => {
+  const items = await chequeBooks().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(50).toArray();
+  res.json({ chequeBooks: items.map(item => ({ id: String(item._id), reference: item.reference, leaves: item.leaves, status: item.status, requestedAt: item.createdAt, issuedAt: item.issuedAt || null })) });
+});
+app.post("/api/banking/cheque-books", permit("customer"), async (req, res) => {
+  const leaves = Number(req.body?.leaves);
+  if (![10, 25, 50].includes(leaves)) return res.status(400).json({ error: "Choose 10, 25 or 50 leaves." });
+  const account = await ensureDemoAccount(req.session.user);
+  if (await chequeBooks().findOne({ userId: req.session.user.id, status: "requested" })) return res.status(409).json({ error: "You already have a pending cheque book request." });
+  const reference = "PCCB" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+  const inserted = await chequeBooks().insertOne({ userId: req.session.user.id, accountId: account._id, customerName: req.session.user.name, branchName: req.session.user.branchName || account.branchName, reference, leaves, status: "requested", createdAt: new Date() });
+  await audit(req.session.user, "DEMO_CHEQUE_BOOK_REQUESTED", reference + " / " + leaves + " leaves");
+  res.status(201).json({ ok: true, id: String(inserted.insertedId), reference, leaves, status: "requested", mode: "DEMO" });
+});
+app.get("/api/banking/cheque-books/queue", permit("headquarters", "branch", "manager"), async (req, res) => {
+  const actor = req.session.user;
+  const filter = { status: "requested" };
+  if (actor.role !== "headquarters") filter.branchName = actor.branchName || "";
+  const items = await chequeBooks().find(filter).sort({ createdAt: 1 }).limit(100).toArray();
+  res.json({ requests: items.map(item => ({ id: String(item._id), reference: item.reference, customerName: item.customerName, leaves: item.leaves, branchName: item.branchName, status: item.status, createdAt: item.createdAt })) });
+});
+app.patch("/api/banking/cheque-books/:id/issue", permit("headquarters", "branch", "manager"), async (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid cheque book request." });
+  const actor = req.session.user;
+  const filter = { _id: new ObjectId(req.params.id), status: "requested" };
+  if (actor.role !== "headquarters") filter.branchName = actor.branchName || "";
+  const result = await chequeBooks().findOneAndUpdate(filter, { $set: { status: "issued", issuedAt: new Date(), issuedBy: actor.email } }, { returnDocument: "after" });
+  const item = result?.value || result;
+  if (!item) return res.status(404).json({ error: "Pending cheque book request not found in your branch." });
+  await audit(actor, "DEMO_CHEQUE_BOOK_ISSUED", item.reference);
+  res.json({ ok: true, reference: item.reference, status: item.status, mode: "DEMO" });
 });
 
 app.get("/api/banking/loans", signed, async (req, res) => {
