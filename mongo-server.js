@@ -652,7 +652,7 @@ app.patch("/api/requests/:id/status", permit("headquarters", "branch", "manager"
 
 
 // DEMO BANKING ENGINE — internal MongoDB simulation only; no external payment/bank APIs.
-app.get("/api/banking/account", permit("customer"), async (req, res) => {
+app.get("/api/banking/account", permitCustomerAccount, async (req, res) => {
   try {
     const account = await ensureDemoAccount(req.session.user);
     res.json({ account: {
@@ -663,7 +663,7 @@ app.get("/api/banking/account", permit("customer"), async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Could not load demo account." }); }
 });
 
-app.get("/api/banking/transactions", permit("customer"), async (req, res) => {
+app.get("/api/banking/transactions", permitCustomerAccount, async (req, res) => {
   try {
     const account = await ensureDemoAccount(req.session.user);
     const items = await bankTransactions().find({ accountId: account._id }).sort({ createdAt: -1 }).limit(100).toArray();
@@ -675,7 +675,7 @@ app.get("/api/banking/transactions", permit("customer"), async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Could not load demo statement." }); }
 });
 
-app.post("/api/banking/transfer", permit("customer"), async (req, res) => {
+app.post("/api/banking/transfer", permitCustomerAccount, async (req, res) => {
   try {
     const accountNumber = cleanText(req.body?.accountNumber, 30).toUpperCase();
     const amountPaise = paise(req.body?.amount);
@@ -791,14 +791,14 @@ app.patch("/api/banking/cash-operations/:id/approve", permit("headquarters", "br
 
 
 // Customer conveniences: saved beneficiaries, fixed deposits and demo loan workflow.
-app.get("/api/banking/beneficiaries", permit("customer"), async (req, res) => {
+app.get("/api/banking/beneficiaries", permitCustomerAccount, async (req, res) => {
   try {
     const items = await beneficiaries().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(50).toArray();
     res.json({ beneficiaries: items.map(item => ({ id: String(item._id), name: item.name, accountNumber: item.accountNumber, createdAt: item.createdAt })) });
   } catch (error) { res.status(500).json({ error: "Could not load saved beneficiaries." }); }
 });
 
-app.post("/api/banking/beneficiaries", permit("customer"), async (req, res) => {
+app.post("/api/banking/beneficiaries", permitCustomerAccount, async (req, res) => {
   try {
     const name = cleanText(req.body?.name, 60);
     const accountNumber = cleanText(req.body?.accountNumber, 30).toUpperCase();
@@ -816,7 +816,7 @@ app.post("/api/banking/beneficiaries", permit("customer"), async (req, res) => {
   }
 });
 
-app.delete("/api/banking/beneficiaries/:id", permit("customer"), async (req, res) => {
+app.delete("/api/banking/beneficiaries/:id", permitCustomerAccount, async (req, res) => {
   try {
     if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid beneficiary id." });
     const result = await beneficiaries().deleteOne({ _id: new ObjectId(req.params.id), userId: req.session.user.id });
@@ -847,7 +847,7 @@ async function matureDueFixedDeposits(userId) {
   }
 }
 
-app.get("/api/banking/fixed-deposits", permit("customer"), async (req, res) => {
+app.get("/api/banking/fixed-deposits", permitCustomerAccount, async (req, res) => {
   try {
     await matureDueFixedDeposits(req.session.user.id);
     const items = await fixedDeposits().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(100).toArray();
@@ -859,7 +859,7 @@ app.get("/api/banking/fixed-deposits", permit("customer"), async (req, res) => {
   } catch (error) { res.status(500).json({ error: "Could not load demo fixed deposits." }); }
 });
 
-app.post("/api/banking/fixed-deposits", permit("customer"), async (req, res) => {
+app.post("/api/banking/fixed-deposits", permitCustomerAccount, async (req, res) => {
   try {
     const principalPaise = paise(req.body?.amount);
     const tenureMonths = Number(req.body?.tenureMonths);
@@ -903,7 +903,7 @@ app.post("/api/banking/fixed-deposits", permit("customer"), async (req, res) => 
 });
 
 
-app.get("/api/banking/recurring-deposits", permit("customer"), async (req, res) => {
+app.get("/api/banking/recurring-deposits", permitCustomerAccount, async (req, res) => {
   try {
     const items = await recurringDeposits().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(100).toArray();
     res.json({ recurringDeposits: items.map(item => ({
@@ -915,7 +915,7 @@ app.get("/api/banking/recurring-deposits", permit("customer"), async (req, res) 
   } catch (error) { res.status(500).json({ error: "Could not load demo recurring deposits." }); }
 });
 
-app.post("/api/banking/recurring-deposits", permit("customer"), async (req, res) => {
+app.post("/api/banking/recurring-deposits", permitCustomerAccount, async (req, res) => {
   try {
     const monthlyAmountPaise = paise(req.body?.monthlyAmount);
     const tenureMonths = Number(req.body?.tenureMonths);
@@ -938,7 +938,7 @@ app.post("/api/banking/recurring-deposits", permit("customer"), async (req, res)
   } catch (error) { res.status(500).json({ error: "Could not open demo recurring deposit." }); }
 });
 
-app.post("/api/banking/recurring-deposits/:id/pay", permit("customer"), async (req, res) => {
+app.post("/api/banking/recurring-deposits/:id/pay", permitCustomerAccount, async (req, res) => {
   if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid recurring deposit id." });
   const userId = req.session.user.id;
   const rd = await recurringDeposits().findOne({ _id: new ObjectId(req.params.id), userId, status: "active" });
@@ -1004,7 +1004,7 @@ app.post("/api/banking/recurring-deposits/:id/pay", permit("customer"), async (r
   }
 });
 
-app.post("/api/banking/loans", permit("customer"), async (req, res) => {
+app.post("/api/banking/loans", permitCustomerAccount, async (req, res) => {
   try {
     const amountPaise = paise(req.body?.amount);
     const tenureMonths = Number(req.body?.tenureMonths);
@@ -1030,11 +1030,11 @@ app.post("/api/banking/loans", permit("customer"), async (req, res) => {
 });
 
 
-app.get("/api/banking/cards", permit("customer"), async (req, res) => {
+app.get("/api/banking/cards", permitCustomerAccount, async (req, res) => {
   const card = await demoCards().findOne({ userId: req.session.user.id });
   res.json({ card: card ? { id: String(card._id), reference: card.reference, holderName: card.holderName, last4: card.last4, network: card.network, cardType: card.cardType, status: card.status, issuedAt: card.issuedAt } : null, mode: "DEMO" });
 });
-app.post("/api/banking/cards", permit("customer"), async (req, res) => {
+app.post("/api/banking/cards", permitCustomerAccount, async (req, res) => {
   try {
     if (await demoCards().findOne({ userId: req.session.user.id })) return res.status(409).json({ error: "A demo debit card already exists." });
     const account = await ensureDemoAccount(req.session.user);
@@ -1044,7 +1044,7 @@ app.post("/api/banking/cards", permit("customer"), async (req, res) => {
     res.status(201).json({ ok: true, card: { id: String(inserted.insertedId), reference: card.reference, holderName: card.holderName, last4: card.last4, network: card.network, cardType: card.cardType, status: card.status, issuedAt: card.issuedAt }, mode: "DEMO" });
   } catch (error) { res.status(500).json({ error: "Could not issue demo debit card." }); }
 });
-app.patch("/api/banking/cards/status", permit("customer"), async (req, res) => {
+app.patch("/api/banking/cards/status", permitCustomerAccount, async (req, res) => {
   const status = req.body?.status;
   if (!["active", "frozen"].includes(status)) return res.status(400).json({ error: "Choose active or frozen." });
   const result = await demoCards().findOneAndUpdate({ userId: req.session.user.id }, { $set: { status, updatedAt: new Date() } }, { returnDocument: "after" });
@@ -1053,11 +1053,11 @@ app.patch("/api/banking/cards/status", permit("customer"), async (req, res) => {
   await audit(req.session.user, status === "frozen" ? "DEMO_CARD_FROZEN" : "DEMO_CARD_UNFROZEN", card.reference);
   res.json({ ok: true, status: card.status, reference: card.reference, mode: "DEMO" });
 });
-app.get("/api/banking/cheque-books", permit("customer"), async (req, res) => {
+app.get("/api/banking/cheque-books", permitCustomerAccount, async (req, res) => {
   const items = await chequeBooks().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(50).toArray();
   res.json({ chequeBooks: items.map(item => ({ id: String(item._id), reference: item.reference, leaves: item.leaves, status: item.status, requestedAt: item.createdAt, issuedAt: item.issuedAt || null })) });
 });
-app.post("/api/banking/cheque-books", permit("customer"), async (req, res) => {
+app.post("/api/banking/cheque-books", permitCustomerAccount, async (req, res) => {
   const leaves = Number(req.body?.leaves);
   if (![10, 25, 50].includes(leaves)) return res.status(400).json({ error: "Choose 10, 25 or 50 leaves." });
   const account = await ensureDemoAccount(req.session.user);
@@ -1089,6 +1089,9 @@ app.patch("/api/banking/cheque-books/:id/issue", permit("headquarters", "branch"
 app.get("/api/banking/loans", signed, async (req, res) => {
   try {
     const actor = req.session.user;
+    if (actor.role === "customer" && !await bankAccounts().findOne({ userId: actor.id }, { projection: { _id: 1 } })) {
+      return res.status(403).json({ error: "Your demo account is pending approval." });
+    }
     let filter;
     if (actor.role === "customer") filter = { userId: actor.id };
     else if (actor.role === "headquarters") filter = {};
@@ -1160,7 +1163,7 @@ app.patch("/api/banking/loans/:id/decision", permit("headquarters", "branch", "m
 });
 
 
-app.post("/api/banking/loans/:id/repay", permit("customer"), async (req, res) => {
+app.post("/api/banking/loans/:id/repay", permitCustomerAccount, async (req, res) => {
   let claimedLoan = null;
   let debitedAccount = null;
   let ledgerInserted = false;
