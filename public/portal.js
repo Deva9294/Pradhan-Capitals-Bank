@@ -272,6 +272,7 @@ async function loadPortal() {
     }
     if (role === "customer") {
       $("#customerProductsCard").classList.remove("hidden");
+      $("#customerRDCard").classList.remove("hidden");
       $("#customerLoanCard").classList.remove("hidden");
       await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans()]);
     }
