@@ -70,6 +70,27 @@
   <div class="row" style="margin-top:18px"><h3>My recurring deposits</h3><button class="btn outline" id="refreshRDs" type="button">Refresh</button></div>
   <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Monthly</th><th>Rate</th><th>Paid</th><th>Maturity estimate</th><th>Next due</th><th>Status / Action</th></tr></thead><tbody id="rdRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 </section>
+
+<section class="card hidden" id="customerCardCheque" style="margin-top:20px">
+  <div class="row"><div><h2>ATM / Debit Card Management</h2><p class="muted">Virtual demo card only. No real card number, CVV, PIN or payment capability is created.</p></div><span class="security">● DEMO ONLY</span></div>
+  <div id="demoCardPanel" class="card" style="margin-top:12px"><p class="muted">Loading demo card…</p></div>
+  <button class="btn" id="issueDemoCard" type="button">Issue virtual demo debit card</button>
+  <p id="cardMessage" class="muted" role="status"></p>
+  <div class="divider"></div>
+  <h2>Cheque Book Request</h2><p class="muted">Request a simulated cheque book. Branch/Manager/HQ can mark it as issued.</p>
+  <form id="chequeBookForm" class="formgrid">
+    <div class="field"><label for="chequeLeaves">Number of leaves</label><select id="chequeLeaves"><option value="10">10 leaves</option><option value="25">25 leaves</option><option value="50">50 leaves</option></select></div>
+    <div class="field"><button class="btn">Request cheque book</button></div>
+  </form>
+  <p id="chequeMessage" class="muted" role="status"></p>
+  <div class="tablewrap"><table><thead><tr><th>Reference</th><th>Leaves</th><th>Requested</th><th>Issued</th><th>Status</th></tr></thead><tbody id="chequeBookRows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
+</section>
+<section class="card hidden" id="chequeBookQueue" style="margin-top:20px">
+  <h2>Cheque Book Issuance Queue</h2><p class="muted">Branch-scoped requests. HQ can view all branches.</p>
+  <button class="btn outline" id="refreshChequeQueue" type="button">Refresh queue</button>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Customer</th><th>Leaves</th><th>Branch</th><th>Action</th></tr></thead><tbody id="chequeQueueRows"><tr><td colspan="5">Loading…</td></tr></tbody></table></div>
+  <p id="chequeQueueMessage" class="muted" role="status"></p>
+</section>
 <section class="card hidden" id="customerLoanCard" style="margin-top:20px">
   <h2>Demo Loan Application</h2><p class="muted">Sample workflow only. Illustrative 12% p.a. EMI schedule and repayments affect demo balance only; no real credit is issued or collected.</p>
   <form id="loanForm" class="formgrid">
