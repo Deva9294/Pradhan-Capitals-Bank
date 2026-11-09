@@ -25,7 +25,7 @@
     </form></div>
     <div class="card"><h3>Demo banking details</h3><p class="muted">Use another customer demo account number as beneficiary. Transfers update both demo balances and create ledger entries. Daily demo limit: ₹50,000 per transfer.</p><p class="notice">This is not UPI, IMPS, NEFT or RTGS. No real bank network is connected.</p></div>
   </div>
-  <div class="row" style="margin-top:20px"><h3>Passbook / Transaction statement</h3><button class="btn outline" id="refreshBanking" type="button">Refresh</button></div>
+  <div class="row" style="margin-top:20px"><h3>Passbook / Transaction statement</h3><div class="actions"><button class="btn outline" id="downloadStatement" type="button">Download PDF</button><button class="btn outline" id="refreshBanking" type="button">Refresh</button></div></div>
   <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Debit / Credit</th><th>Amount</th><th>Status</th></tr></thead><tbody id="bankTransactionRows"><tr><td colspan="6">Loading…</td></tr></tbody></table></div>
 </section>
 <section class="card hidden" id="cashierBankingCard" style="margin-top:20px">
@@ -58,6 +58,17 @@
   </div>
   <div class="row" style="margin-top:20px"><h3>My Fixed Deposits</h3><button class="btn outline" id="refreshFDs" type="button">Refresh</button></div>
   <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Principal</th><th>Rate</th><th>Tenure</th><th>Maturity Value</th><th>Maturity Date</th><th>Status</th></tr></thead><tbody id="fdRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+</section>
+
+<section class="card hidden" id="customerRDCard" style="margin-top:20px">
+  <div class="row"><div><h2>Recurring Deposit (RD) Simulator</h2><p class="muted">Illustrative 6.5% p.a. estimate. You manually pay each monthly installment; no automatic debit.</p></div><span class="security">● DEMO ONLY</span></div>
+  <form id="rdForm" class="formgrid" style="margin-top:14px">
+    <div class="field"><label for="rdMonthlyAmount">Monthly installment (₹100–₹50,000)</label><input id="rdMonthlyAmount" type="number" min="100" max="50000" step="0.01" required></div>
+    <div class="field"><label for="rdTenure">Tenure</label><select id="rdTenure"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option><option value="30">30 months</option><option value="36">36 months</option></select></div>
+    <div class="full"><button class="btn">Open demo RD</button><p id="rdMessage" class="muted" role="status"></p></div>
+  </form>
+  <div class="row" style="margin-top:18px"><h3>My recurring deposits</h3><button class="btn outline" id="refreshRDs" type="button">Refresh</button></div>
+  <div class="tablewrap" style="margin-top:12px"><table><thead><tr><th>Reference</th><th>Monthly</th><th>Rate</th><th>Paid</th><th>Maturity estimate</th><th>Next due</th><th>Status / Action</th></tr></thead><tbody id="rdRows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
 </section>
 <section class="card hidden" id="customerLoanCard" style="margin-top:20px">
   <h2>Demo Loan Application</h2><p class="muted">Sample workflow only. Illustrative 12% p.a. EMI schedule and repayments affect demo balance only; no real credit is issued or collected.</p>
