@@ -69,6 +69,7 @@ const bankTransactions = () => db.collection("bank_transactions");
 const cashOperations = () => db.collection("cash_operations");
 const beneficiaries = () => db.collection("demo_beneficiaries");
 const fixedDeposits = () => db.collection("demo_fixed_deposits");
+const recurringDeposits = () => db.collection("demo_recurring_deposits");
 const loanApplications = () => db.collection("demo_loan_applications");
 const paise = value => Math.round(Number(value) * 100);
 const inr = value => Number((Number(value || 0) / 100).toFixed(2));
@@ -218,6 +219,7 @@ async function initialise() {
     cashOperations().createIndex({ status: 1, branchName: 1, createdAt: -1 }),
     beneficiaries().createIndex({ userId: 1, accountNumber: 1 }, { unique: true }),
     fixedDeposits().createIndex({ userId: 1, status: 1, maturityAt: 1 }),
+    recurringDeposits().createIndex({ userId: 1, status: 1, createdAt: -1 }),
     loanApplications().createIndex({ userId: 1, createdAt: -1 }),
     loanApplications().createIndex({ status: 1, branchName: 1, createdAt: -1 })
 
@@ -822,6 +824,109 @@ app.post("/api/banking/fixed-deposits", permit("customer"), async (req, res) => 
     await audit(req.session.user, "DEMO_FD_OPENED", reference + " / ₹" + inr(principalPaise));
     res.status(201).json({ ok: true, reference, principal: inr(principalPaise), rate, maturityAmount: inr(maturityAmountPaise), maturityAt, mode: "DEMO" });
   } catch (error) { res.status(500).json({ error: "Could not open demo fixed deposit." }); }
+});
+
+
+app.get("/api/banking/recurring-deposits", permit("customer"), async (req, res) => {
+  try {
+    const items = await recurringDeposits().find({ userId: req.session.user.id }).sort({ createdAt: -1 }).limit(100).toArray();
+    res.json({ recurringDeposits: items.map(item => ({
+      id: String(item._id), reference: item.reference, monthlyAmount: inr(item.monthlyAmountPaise),
+      rate: item.rate, tenureMonths: item.tenureMonths, paidInstallments: item.paidInstallments,
+      totalInstallments: item.tenureMonths, maturityAmount: inr(item.maturityAmountPaise),
+      nextDueAt: item.nextDueAt, status: item.status, createdAt: item.createdAt
+    })) });
+  } catch (error) { res.status(500).json({ error: "Could not load demo recurring deposits." }); }
+});
+
+app.post("/api/banking/recurring-deposits", permit("customer"), async (req, res) => {
+  try {
+    const monthlyAmountPaise = paise(req.body?.monthlyAmount);
+    const tenureMonths = Number(req.body?.tenureMonths);
+    if (!Number.isSafeInteger(monthlyAmountPaise) || monthlyAmountPaise < 10000 || monthlyAmountPaise > 5000000 ||
+        !Number.isInteger(tenureMonths) || tenureMonths < 6 || tenureMonths > 36 || tenureMonths % 6 !== 0) {
+      return res.status(400).json({ error: "Demo RD monthly amount must be ₹100–₹50,000 and tenure 6–36 months in 6-month steps." });
+    }
+    const rate = 6.5;
+    const monthlyRate = rate / 1200;
+    const maturityAmountPaise = Math.round(monthlyAmountPaise * ((Math.pow(1 + monthlyRate, tenureMonths) - 1) / monthlyRate));
+    const now = new Date();
+    const reference = "PCRD" + randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase();
+    const result = await recurringDeposits().insertOne({
+      userId: req.session.user.id, accountId: (await ensureDemoAccount(req.session.user))._id,
+      reference, monthlyAmountPaise, rate, tenureMonths, maturityAmountPaise,
+      paidInstallments: 0, nextDueAt: addMonths(now, 1), status: "active", createdAt: now, updatedAt: now
+    });
+    await audit(req.session.user, "DEMO_RD_OPENED", reference + " / monthly ₹" + inr(monthlyAmountPaise));
+    res.status(201).json({ ok: true, id: String(result.insertedId), reference, monthlyAmount: inr(monthlyAmountPaise), rate, tenureMonths, maturityAmount: inr(maturityAmountPaise), nextDueAt: addMonths(now, 1), mode: "DEMO" });
+  } catch (error) { res.status(500).json({ error: "Could not open demo recurring deposit." }); }
+});
+
+app.post("/api/banking/recurring-deposits/:id/pay", permit("customer"), async (req, res) => {
+  if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ error: "Invalid recurring deposit id." });
+  const userId = req.session.user.id;
+  const rd = await recurringDeposits().findOne({ _id: new ObjectId(req.params.id), userId, status: "active" });
+  if (!rd) return res.status(404).json({ error: "Active demo recurring deposit not found." });
+  const installmentNumber = rd.paidInstallments + 1;
+  if (installmentNumber > rd.tenureMonths) return res.status(409).json({ error: "All installments are already paid." });
+  const finalInstallment = installmentNumber === rd.tenureMonths;
+  const reference = rd.reference + "-I" + String(installmentNumber).padStart(2, "0");
+  const claim = await recurringDeposits().updateOne(
+    { _id: rd._id, userId, status: "active", paidInstallments: rd.paidInstallments },
+    { $set: { status: finalInstallment ? "maturing" : "active", lastPaymentReference: reference, updatedAt: new Date() },
+      $inc: { paidInstallments: 1 },
+      ...(finalInstallment ? {} : { $setOnInsert: {} })
+    }
+  );
+  if (!claim.modifiedCount) return res.status(409).json({ error: "This installment was already processed. Refresh the RD list." });
+  let debited = false;
+  let installmentLedger = false;
+  let maturityCredited = false;
+  let maturityLedger = false;
+  try {
+    const account = await bankAccounts().updateOne(
+      { _id: rd.accountId, userId, status: "active", balancePaise: { $gte: rd.monthlyAmountPaise } },
+      { $inc: { balancePaise: -rd.monthlyAmountPaise }, $set: { updatedAt: new Date() } }
+    );
+    if (!account.modifiedCount) throw new Error("Insufficient demo balance or account unavailable.");
+    debited = true;
+    await bankTransactions().insertOne({
+      transferId: reference, accountId: rd.accountId, userId, direction: "debit",
+      type: "demo_rd_installment", amountPaise: rd.monthlyAmountPaise,
+      counterparty: "DEMO RECURRING DEPOSIT", reference,
+      note: "Manually paid simulated recurring deposit installment " + installmentNumber,
+      status: "completed", createdAt: new Date()
+    });
+    installmentLedger = true;
+    if (finalInstallment) {
+      const credited = await bankAccounts().updateOne({ _id: rd.accountId, userId, status: "active" },
+        { $inc: { balancePaise: rd.maturityAmountPaise }, $set: { updatedAt: new Date() } });
+      if (!credited.modifiedCount) throw new Error("Could not credit demo RD maturity.");
+      maturityCredited = true;
+      await bankTransactions().insertOne({
+        transferId: rd.reference + "-MATURITY", accountId: rd.accountId, userId, direction: "credit",
+        type: "demo_rd_maturity", amountPaise: rd.maturityAmountPaise,
+        counterparty: "DEMO RECURRING DEPOSIT", reference: rd.reference,
+        note: "Simulated recurring deposit maturity including illustrative interest",
+        status: "completed", createdAt: new Date()
+      });
+      maturityLedger = true;
+      await recurringDeposits().updateOne({ _id: rd._id, status: "maturing" }, { $set: { status: "matured", maturedAt: new Date(), nextDueAt: null } });
+    } else {
+      await recurringDeposits().updateOne({ _id: rd._id, status: "active" }, { $set: { nextDueAt: addMonths(rd.nextDueAt || new Date(), 1) } });
+    }
+    await audit(req.session.user, "DEMO_RD_INSTALLMENT_PAID", reference);
+    res.json({ ok: true, reference, installmentNumber, paidAmount: inr(rd.monthlyAmountPaise),
+      paidInstallments: installmentNumber, maturityAmount: finalInstallment ? inr(rd.maturityAmountPaise) : null,
+      status: finalInstallment ? "matured" : "active", mode: "DEMO" });
+  } catch (error) {
+    if (maturityLedger) await bankTransactions().deleteOne({ transferId: rd.reference + "-MATURITY" });
+    if (maturityCredited) await bankAccounts().updateOne({ _id: rd.accountId }, { $inc: { balancePaise: -rd.maturityAmountPaise } });
+    if (installmentLedger) await bankTransactions().deleteOne({ transferId: reference });
+    if (debited) await bankAccounts().updateOne({ _id: rd.accountId }, { $inc: { balancePaise: rd.monthlyAmountPaise } });
+    await recurringDeposits().updateOne({ _id: rd._id }, { $set: { status: "active", paidInstallments: rd.paidInstallments, nextDueAt: rd.nextDueAt, lastPaymentReference: null } });
+    return res.status(400).json({ error: error.message || "Could not process demo RD installment." });
+  }
 });
 
 app.post("/api/banking/loans", permit("customer"), async (req, res) => {
