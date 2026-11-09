@@ -169,6 +169,20 @@ async function loadFixedDeposits() {
     "</td><td>" + escapeHtml(item.status) + "</td></tr>"
   ).join("") || '<tr><td colspan="7">No fixed deposits yet.</td></tr>';
 }
+
+async function loadRecurringDeposits() {
+  const data = await api("/api/banking/recurring-deposits");
+  $("#rdRows").innerHTML = (data.recurringDeposits || []).map(item => {
+    const action = item.status === "active"
+      ? '<button class="btn rd-pay" type="button" data-id="' + escapeHtml(item.id) + '">Pay installment</button>'
+      : "—";
+    return "<tr><td>" + escapeHtml(item.reference) + "</td><td>" + money(item.monthlyAmount) +
+      "</td><td>" + escapeHtml(item.rate) + "%</td><td>" + escapeHtml(item.paidInstallments) + "/" +
+      escapeHtml(item.totalInstallments) + "</td><td>" + money(item.maturityAmount) +
+      "</td><td>" + escapeHtml(item.nextDueAt ? formatDate(item.nextDueAt) : "—") +
+      "</td><td>" + escapeHtml(item.status) + " " + action + "</td></tr>";
+  }).join("") || '<tr><td colspan="7">No recurring deposits yet.</td></tr>';
+}
 async function loadLoans() {
   const data = await api("/api/banking/loans");
   const items = data.loans || [];
@@ -259,7 +273,7 @@ async function loadPortal() {
     if (role === "customer") {
       $("#customerProductsCard").classList.remove("hidden");
       $("#customerLoanCard").classList.remove("hidden");
-      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadLoans()]);
+      await Promise.all([loadBeneficiaries(), loadFixedDeposits(), loadRecurringDeposits(), loadLoans()]);
     }
     if (["headquarters", "branch", "manager"].includes(role)) {
       $("#loanOperationsCard").classList.remove("hidden");
@@ -349,6 +363,29 @@ $("#demoTransferForm")?.addEventListener("submit", async event => {
   } catch (error) { showMessage("#transferMessage", error.message); }
 });
 $("#refreshBanking")?.addEventListener("click", loadBanking);
+
+$("#downloadStatement")?.addEventListener("click", async () => {
+  try {
+    const [accountData, statement] = await Promise.all([api("/api/banking/account"), api("/api/banking/transactions")]);
+    const account = accountData.account;
+    const rows = (statement.transactions || []).map(item =>
+      "<tr><td>" + escapeHtml(formatDate(item.createdAt)) + "</td><td>" + escapeHtml(item.reference) +
+      "</td><td>" + escapeHtml((item.type || "").replaceAll("_", " ")) + "</td><td>" +
+      escapeHtml(item.direction) + "</td><td>" + money(item.amount) + "</td><td>" + escapeHtml(item.status) + "</td></tr>"
+    ).join("");
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) throw new Error("Allow pop-ups to create your statement PDF.");
+    printWindow.document.write("<!doctype html><html><head><title>Demo Passbook Statement</title><style>body{font:14px Arial,sans-serif;padding:28px;color:#111}h1{margin-bottom:4px}p{color:#444}.notice{border:1px solid #999;padding:10px;margin:16px 0}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #bbb;padding:8px;text-align:left;font-size:11px}th{background:#eee}</style></head><body><h1>Pradhan Capitals Bank</h1><h2>Demo Passbook / Account Statement</h2><p>Account: " +
+      escapeHtml(account.accountNumber) + " · Type: " + escapeHtml(account.accountType) + " · Demo balance: " + money(account.balance) +
+      "</p><div class='notice'>DEMO STATEMENT ONLY — not a bank statement or proof of funds. No real banking transaction has occurred.</div><table><thead><tr><th>Date</th><th>Reference</th><th>Type</th><th>Direction</th><th>Amount</th><th>Status</th></tr></thead><tbody>" +
+      (rows || "<tr><td colspan='6'>No transactions recorded.</td></tr>") +
+      "</tbody></table><p>Generated: " + escapeHtml(new Date().toLocaleString()) + "</p><button onclick='window.print()'>Print / Save as PDF</button></body></html>");
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  } catch (error) { showMessage("#transferMessage", error.message); }
+});
+
 $("#cashOperationForm")?.addEventListener("submit", async event => {
   event.preventDefault();
   showMessage("#cashOperationMessage", "Submitting for approval…");
@@ -430,6 +467,37 @@ $("#fdForm")?.addEventListener("submit", async event => {
 $("#refreshFDs")?.addEventListener("click", async () => {
   await Promise.all([loadFixedDeposits(), loadBanking()]);
 });
+
+$("#rdForm")?.addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("#rdMessage", "Opening demo recurring deposit…");
+  try {
+    const result = await api("/api/banking/recurring-deposits", {
+      method: "POST", body: JSON.stringify({ monthlyAmount: $("#rdMonthlyAmount").value, tenureMonths: $("#rdTenure").value })
+    });
+    showMessage("#rdMessage", "Demo RD opened: " + result.reference + " · Estimated maturity " + money(result.maturityAmount));
+    event.target.reset();
+    await loadRecurringDeposits();
+  } catch (error) { showMessage("#rdMessage", error.message); }
+});
+$("#refreshRDs")?.addEventListener("click", loadRecurringDeposits);
+$("#rdRows")?.addEventListener("click", async event => {
+  const button = event.target.closest(".rd-pay");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const result = await api("/api/banking/recurring-deposits/" + encodeURIComponent(button.dataset.id) + "/pay", {
+      method: "POST", body: "{}"
+    });
+    showMessage("#rdMessage", "Installment " + result.installmentNumber + " paid: " + money(result.paidAmount) +
+      (result.status === "matured" ? " · Maturity credited: " + money(result.maturityAmount) : ""));
+    await Promise.all([loadRecurringDeposits(), loadBanking()]);
+  } catch (error) {
+    showMessage("#rdMessage", error.message);
+    button.disabled = false;
+  }
+});
+
 $("#loanForm")?.addEventListener("submit", async event => {
   event.preventDefault();
   showMessage("#loanMessage", "Submitting demo loan application…");
